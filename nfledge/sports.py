@@ -27,8 +27,8 @@ class Sport:
         """-> (schedule with kickoff_utc/final/pickable/close_*, team_games, groups)"""
         raise NotImplementedError
 
-    def engine(self, tg, sched, groups):
-        return ratings.RatingsEngine(tg, sched, self.params(), groups)
+    def engine(self, tg, sched, groups, params=None):
+        return ratings.RatingsEngine(tg, sched, params or self.params(), groups)
 
     def current_week(self, sched, now):
         cur = sched[(sched["season"] == self.season) & sched["pickable"]]
@@ -120,6 +120,12 @@ class NCAAF(Sport):
 
     def feed(self, sched):
         return lines.ncaaf_feed(self.teams)
+
+    def engine(self, tg, sched, groups, params=None):
+        from nfledge import cfb_data
+        params = params or self.params()
+        talent = cfb_data.load_talent(sorted(set(tg["season"]))) if params.get("PRIOR_MODEL") == "talent" else None
+        return ratings.RatingsEngine(tg, sched, params, groups, talent)
 
     def ready_to_lock(self, sched, tg, week, now):
         """Earlier FBS games final, and play-by-play present for >= 95% of last week's FBS-vs-FBS games."""

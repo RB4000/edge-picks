@@ -73,6 +73,8 @@ class Fit:
     pts: tuple = (0.0, 0.0, 0.0)   # (a, b, c): points = a + b*plays + c*plays*epa
     hfa_pts: float = 0.0           # home field advantage in points (full margin swing)
     total_offset: float = 0.0      # subtracted from projected totals (totals calibration)
+    margin_scale: float = 1.0      # scale calibration (NCAAF v1.1+): team-strength margin multiplier
+    total_scale: tuple = (0.0, 1.0)  # scale calibration: total -> a + b * total (before total_offset)
     sec_per_play: dict = field(default_factory=dict)
     games_played: dict = field(default_factory=dict)
 
@@ -141,7 +143,7 @@ def _center(beta, teams, groups, G):
     return beta
 
 
-def _prior_vectors(prior: Fit | None, teams, groups, G, P, tg):
+def _prior_vectors(prior: Fit | None, teams, groups, G, P, tg, override=None):
     """Prior means for this season's coefficient vector, mapped from last season's fit."""
     L = _layout(len(teams), G)
     eff0, pace0 = np.zeros(L["k"]), np.zeros(L["k"])
@@ -166,13 +168,17 @@ def _prior_vectors(prior: Fit | None, teams, groups, G, P, tg):
                 abs_last = prior.team_eff(pvec, t, side)
                 base_now = pvec[pL["g" + side] + g_now - 1] if (g_now > 0 and g_now <= prior.n_groups) else 0.0
                 vec0[L[side] + i] = (abs_last - base_now) * reg
+    for i, t in enumerate(teams):  # preseason prior model (NCAAF v1.1): replaces the flat regression
+        if override and t in override and groups.get(t, 0) == 0:
+            vec0_off, vec0_def = override[t]
+            eff0[L["off"] + i], eff0[L["def"] + i] = vec0_off, vec0_def
     return eff0, pace0
 
 
-def _fit(tg, prior, target_week, teams, groups, P):
+def _fit(tg, prior, target_week, teams, groups, P, override=None):
     G = P["N_GROUPS"]
     L = _layout(len(teams), G)
-    eff0, pace0 = _prior_vectors(prior, teams, groups, G, P, tg)
+    eff0, pace0 = _prior_vectors(prior, teams, groups, G, P, tg, override)
     lam_e = np.full(L["k"], P["PRIOR_PLAYS"])
     lam_e[0] = lam_e[L["h"]] = P["LEAGUE_PRIOR_PLAYS"]
     lam_p = np.full(L["k"], P["PACE_PRIOR_GAMES"])
@@ -183,6 +189,10 @@ def _fit(tg, prior, target_week, teams, groups, P):
     if len(tg) == 0:
         return eff0, pace0
     decay = 0.5 ** ((target_week - tg["week"].to_numpy()) / P["HALF_LIFE_WEEKS"])
+    if P.get("DECAY_NORMALIZE"):
+        # recency should re-weight games, not discard evidence: keep total weight = number of games,
+        # so the prior's pull fades as games accumulate instead of plateauing at ~8 half-weighted games
+        decay = decay / decay.mean()
     X = _design(tg, teams, groups, G)
     eff = _ridge_to_prior(X, tg["epa_per_play"].to_numpy(), tg["epa_plays"].to_numpy() * decay, eff0, lam_e)
     pace = _ridge_to_prior(X, tg["plays"].to_numpy().astype(float), decay, pace0, lam_p)
@@ -252,12 +262,13 @@ class RatingsEngine:
     groups: {season: {team: group}} for college (0 = FBS). None for the NFL.
     """
 
-    def __init__(self, team_games, schedules=None, params=None, groups=None):
+    def __init__(self, team_games, schedules=None, params=None, groups=None, talent=None):
         self.P = params or nfl_params()
         self.tg = team_games.dropna(subset=["points"]).copy()
         self.sched = schedules
         self.groups = groups or {}
         self.calib_start = (self.P["FIRST_SEASON"], 4)
+        self.talent = talent or {}   # {season: {team: talent composite}} for the NCAAF prior model
 
     def _teams(self, season, rows):
         if self.P["N_GROUPS"] == 0:
@@ -277,22 +288,129 @@ class RatingsEngine:
             return None
         prior = self.end_of_season(season - 1)
         teams, groups = self._teams(season, rows), self._groups(season)
-        eff, pace = _fit(rows, prior, rows["week"].max() + 1, teams, groups, self.P)
+        eff, pace = _fit(rows, prior, rows["week"].max() + 1, teams, groups, self.P, self.prior_model(season))
         return Fit(eff=eff, pace=pace, teams=teams, groups=groups, n_groups=self.P["N_GROUPS"])
+
+    @lru_cache(maxsize=None)
+    def data_only(self, season) -> Fit | None:
+        """End-of-season fit from that season's games alone (shrunk toward average, no prior season).
+        Used only to estimate the preseason prior model, so its targets aren't contaminated by a prior."""
+        rows = self.tg[self.tg["season"] == season]
+        if rows.empty:
+            return None
+        teams, groups = self._teams(season, rows), self._groups(season)
+        eff, pace = _fit(rows, None, rows["week"].max() + 1, teams, groups, self.P)
+        return Fit(eff=eff, pace=pace, teams=teams, groups=groups, n_groups=self.P["N_GROUPS"])
+
+    def _prior_inputs(self, season):
+        """FBS team -> (last season off, last season def, talent z-score) for teams with all three."""
+        last, tal = self.data_only(season - 1), self.talent.get(season, {})
+        if last is None or not tal:
+            return {}
+        fbs = [t for t, g in self._groups(season).items() if g == 0 and t in tal and t in last.idx]
+        if len(fbs) < 50:
+            return {}
+        v = np.array([tal[t] for t in fbs])
+        z = (v - v.mean()) / v.std()
+        return {t: (last.team_eff(last.eff, t, "off"), last.team_eff(last.eff, t, "def"), zt)
+                for t, zt in zip(fbs, z)}
+
+    @lru_cache(maxsize=None)
+    def prior_model(self, season):
+        """Preseason prior (PRIOR_MODEL='talent'): per side, OLS of a season's data-only rating on the
+        previous season's data-only rating and the roster talent composite, estimated on every earlier
+        pair of seasons only (walk-forward). Returns {team: (off, def)} or None to use the flat regression."""
+        if self.P.get("PRIOR_MODEL") != "talent":
+            return None
+        X, Y = [], []
+        for s in range(self.P["FIRST_SEASON"] + 1, season):
+            cur, inp = self.data_only(s), self._prior_inputs(s)
+            for t, (o, d, z) in inp.items():
+                if t in cur.idx and self._groups(s).get(t, 0) == 0:
+                    X.append((o, d, z))
+                    Y.append((cur.team_eff(cur.eff, t, "off"), cur.team_eff(cur.eff, t, "def")))
+        inp = self._prior_inputs(season)
+        if len(X) < 100 or not inp:
+            return None
+        X, Y = np.array(X), np.array(Y)
+        coef = {}
+        for j, side in enumerate(("off", "def")):
+            A = np.column_stack([np.ones(len(X)), X[:, j], X[:, 2]])
+            coef[side] = np.linalg.lstsq(A, Y[:, j], rcond=None)[0]
+        self.prior_coefs = getattr(self, "prior_coefs", {})
+        self.prior_coefs[season] = {k: [float(c) for c in v] for k, v in coef.items()}
+        return {t: (coef["off"] @ (1, o, z), coef["def"] @ (1, d, z)) for t, (o, d, z) in inp.items()}
 
     def as_of(self, season, week) -> Fit:
         fit = self._raw_as_of(season, week)
+        if self.sched is not None and self.P.get("SCALE_CALIBRATION"):
+            fit = replace(fit, **self.scales(season, week))
         if self.sched is None or not self.P["TOTALS_CALIBRATION"]:
             return fit
-        return replace(fit, total_offset=self.total_offset(season, week))
+        return replace(fit, total_offset=self.total_offset(season, week, fit))
 
-    def total_offset(self, season, week):
-        """Recency-weighted median of (model total - market total) over every game before (season, week).
-        Each earlier season gets half the weight of the next, matching the HFA estimate."""
+    def _past_games(self, season, week):
         s = self.sched
-        past = s[s["final"] & s["close_total"].notna() & s.get("pickable", True)
+        return s[s["final"] & s["close_total"].notna() & s.get("pickable", True)
                  & ((s["season"] < season) | ((s["season"] == season) & (s["week"] < week)))
                  & ((s["season"] > self.calib_start[0]) | (s["week"] >= self.calib_start[1]))]
+
+    @lru_cache(maxsize=None)
+    def _week_raw(self, season, week):
+        """Walk-forward raw projections for one past week: (team margin excl. HFA, total, actual margin
+        minus the HFA used, actual total, market total). Each from the fit made before that week."""
+        fit = self._raw_as_of(season, week)
+        s = self.sched
+        wk = s[(s["season"] == season) & (s["week"] == week) & s["final"] & s["close_total"].notna()
+               & s.get("pickable", True)]
+        out = []
+        for g in wk.itertuples():
+            if g.home_team not in fit.idx or g.away_team not in fit.idx:
+                continue
+            pr = project(fit, g.home_team, g.away_team, g.neutral)
+            out.append((pr["margin"] - pr["hfa_pts"], pr["total"],
+                        g.home_score - g.away_score - pr["hfa_pts"], g.home_score + g.away_score, g.close_total))
+        return np.array(out).reshape(-1, 5)
+
+    def _past_raw(self, season, week):
+        past = self._past_games(season, week)
+        rows, weights = [], []
+        for (ss, ww), _ in past.groupby(["season", "week"]):
+            r = self._week_raw(ss, ww)
+            rows.append(r)
+            weights.append(np.full(len(r), 0.5 ** (season - ss)))
+        if not rows:
+            return np.zeros((0, 5)), np.zeros(0)
+        return np.concatenate(rows), np.concatenate(weights)
+
+    def scales(self, season, week):
+        """Walk-forward scale calibration against actual results (not the market): weighted least squares
+        of actual margin (HFA removed) on the model's team-strength margin, through the origin, and of
+        actual total on model total. Uses only games before (season, week)."""
+        r, w = self._past_raw(season, week)
+        if len(r) < 200:
+            return {}
+        m, t, am, at = r[:, 0], r[:, 1], r[:, 2], r[:, 3]
+        k = float(np.sum(w * m * am) / np.sum(w * m * m))
+        X = np.column_stack([np.ones(len(t)), t])
+        XtW = X.T * w
+        a, b = np.linalg.solve(XtW @ X, XtW @ at)
+        return {"margin_scale": k, "total_scale": (float(a), float(b))}
+
+    def total_offset(self, season, week, fit=None):
+        """Recency-weighted median of (model total - market total) over every game before (season, week).
+        Each earlier season gets half the weight of the next, matching the HFA estimate. With scale
+        calibration, past totals are put through this week's total scale first."""
+        if self.P.get("SCALE_CALIBRATION"):
+            r, w = self._past_raw(season, week)
+            if not len(r):
+                return 0.0
+            a, b = fit.total_scale if fit is not None else (0.0, 1.0)
+            return _weighted_median(a + b * r[:, 1] - r[:, 4], w)
+        return self._total_offset_v1(season, week)
+
+    def _total_offset_v1(self, season, week):
+        past = self._past_games(season, week)
         if past.empty:
             return 0.0
         diffs, weights = [], []
@@ -317,7 +435,7 @@ class RatingsEngine:
         cur = self.tg[(self.tg["season"] == season) & (self.tg["week"] < week)]
         prev = self.tg[self.tg["season"] == season - 1]
         teams, groups = self._teams(season, cur), self._groups(season)
-        eff, pace = _fit(cur, prior, week, teams, groups, self.P)
+        eff, pace = _fit(cur, prior, week, teams, groups, self.P, self.prior_model(season))
         history = self.tg[(self.tg["season"] < season) | ((self.tg["season"] == season) & (self.tg["week"] < week))]
         gp = cur.groupby("posteam").size().to_dict()
         if self.P["HFA_METHOD"] == "regression":
@@ -349,6 +467,12 @@ def project(fit: Fit, home, away, neutral=False):
     h_epa, h_plays, h_pts = side(home, away)
     a_epa, a_plays, a_pts = side(away, home)
     hfa_pts = fit.hfa_pts * hf
+    raw_margin, raw_total = h_pts - a_pts, h_pts + a_pts
+    sa, sb = fit.total_scale
+    if fit.margin_scale != 1.0 or (sa, sb) != (0.0, 1.0):  # scale calibration (NCAAF v1.1+)
+        tot = sa + sb * raw_total
+        mar = fit.margin_scale * raw_margin
+        h_pts, a_pts = (tot + mar) / 2, (tot - mar) / 2
     h_pts += hfa_pts / 2 - fit.total_offset / 2
     a_pts -= hfa_pts / 2 + fit.total_offset / 2
 
@@ -358,7 +482,7 @@ def project(fit: Fit, home, away, neutral=False):
         "model_home_spread": -(h_pts - a_pts),
         "home_epa": h_epa, "away_epa": a_epa,
         "home_plays": h_plays, "away_plays": a_plays,
-        "hfa_pts": hfa_pts,
+        "hfa_pts": hfa_pts, "raw_margin": raw_margin, "raw_total": raw_total,
     }
 
 
@@ -393,6 +517,7 @@ def league_terms(fit: Fit):
         "nuisance_home_epa": float(fit.eff[L["h"]]),  # ratings control only; not used in projections
         "pts_a": fit.pts[0], "pts_b": fit.pts[1], "pts_c": fit.pts[2],
         "hfa_pts": fit.hfa_pts, "total_offset": fit.total_offset,
+        "margin_scale": fit.margin_scale, "total_scale": tuple(fit.total_scale),
     }
 
 
@@ -401,6 +526,8 @@ def fit_to_dict(fit: Fit, meta=None, params=None):
     d = {
         "teams": list(fit.teams), "eff": [float(x) for x in fit.eff], "pace": [float(x) for x in fit.pace],
         "pts": list(fit.pts), "hfa_pts": fit.hfa_pts, "total_offset": fit.total_offset,
+        **({"margin_scale": fit.margin_scale, "total_scale": list(fit.total_scale)}
+           if params.get("SCALE_CALIBRATION") else {}),
         "neutral_rule": params["NEUTRAL_RULE"],
         "sec_per_play": {k: (None if np.isnan(v) else float(v)) for k, v in fit.sec_per_play.items()},
         "games_played": {k: int(v) for k, v in fit.games_played.items()},
@@ -417,6 +544,7 @@ def fit_from_dict(d) -> Fit:
     return Fit(eff=np.array(d["eff"]), pace=np.array(d["pace"]), teams=tuple(d["teams"]),
                groups=d.get("groups", {}), n_groups=d.get("n_groups", 0),
                pts=tuple(d["pts"]), hfa_pts=d["hfa_pts"], total_offset=d.get("total_offset", 0.0),
+               margin_scale=d.get("margin_scale", 1.0), total_scale=tuple(d.get("total_scale", (0.0, 1.0))),
                sec_per_play={k: (np.nan if v is None else v) for k, v in d["sec_per_play"].items()},
                games_played=d["games_played"])
 

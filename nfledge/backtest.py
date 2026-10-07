@@ -30,7 +30,7 @@ def run(schedules, team_games, seasons=None, sport=None, params=None, groups=Non
         games = schedules[schedules["season"].isin(seasons) & schedules["final"]]
     else:
         seasons = seasons or config.NCAAF_BACKTEST_SEASONS
-        eng = ratings.RatingsEngine(team_games, schedules, params or sport.params(), groups)
+        eng = sport.engine(team_games, schedules, groups, params)
         games = schedules[schedules["season"].isin(seasons) & schedules["final"] & schedules["pickable"]
                           & schedules["close_home_spread"].notna() & schedules["close_total"].notna()]
     rows = []
@@ -77,6 +77,14 @@ def summarize(bt):
         "market_total_mae": float(np.mean(np.abs(actual_total - bt["market_total"]))),
         "margin_slope": float(np.polyfit(bt["model_margin"], actual_margin, 1)[0]),
         "model_vs_market_corr": float(np.corrcoef(bt["model_margin"], mkt_margin)[0, 1]),
+    }
+    mm = -bt["market_home_spread"]
+    edge = bt["spread_edge"]
+    out["dispersion"] = {
+        "model_margin_sd": float(bt["model_margin"].std()), "market_margin_sd": float(mm.std()),
+        "underdog_share": float(((bt["spread_pick"] != bt["home"]) == (bt["market_home_spread"] < 0)).mean()),
+        "edge_median": float(edge.median()), "edge_ge_3_5": float((edge >= 3.5).mean()),
+        "edge_ge_8": float((edge >= 8).mean()),
     }
     out["n_games"] = len(bt)
     picked = bt[bt["total_pick"].isin(["OVER", "UNDER"])]
@@ -220,6 +228,47 @@ def run_nfl(sensitivity=True):
     return md, _payload(summary, before, config.BACKTEST_SEASONS)
 
 
+COMPRESSION_WHY = (
+    "v1.0's college spreads were compressed: model margins had a standard deviation of about 5 points against the "
+    "market's 13, so actual margins ran about 2.1x the model's (calibration slope 2.1) and most spread picks were "
+    "big underdogs. Three causes, three fixes:\n\n"
+    "1. **Evidence was discarded.** Recency weights (6-week half-life) multiplied each game's weight down while the pull "
+    "toward the prior stayed fixed, so even at season's end a team's rating was roughly 60% this season and 40% prior. "
+    "v1.1 normalizes the recency weights to average 1. They still favor recent games, but the season's total evidence counts in full.\n"
+    "2. **The prior compounded.** Each season started from last season's final ratings x 0.5, and those ratings were "
+    "themselves pulled toward a halved prior. v1.1 replaces the flat 50% with a preseason prior model: last season's rating "
+    "(fit from that season alone) plus the 247 roster-talent composite. The weights are estimated each season from earlier "
+    "seasons only.\n"
+    "3. **The points mapping and residual scale.** Points are fit per team from that team's own EPA, which understates how "
+    "EPA differences turn into margins (0.68 vs about 0.79 points per EPA). v1.1 adds walk-forward scale calibration: the model's "
+    "team-strength margin is multiplied by the least-squares slope of actual margin (home field removed) on model margin over "
+    "every earlier game, and totals get the same treatment before the median-gap totals calibration. The calibration uses actual "
+    "results, not market lines.")
+
+
+def _compression(before, after):
+    b, a = before, after
+    rows = [("Model margin SD (market SD)", lambda s: f"{s['dispersion']['model_margin_sd']:.1f} ({s['dispersion']['market_margin_sd']:.1f})"),
+            ("Calibration slope (1.0 = right scale)", lambda s: f"{s['accuracy']['margin_slope']:.2f}"),
+            ("Correlation with closing margin", lambda s: f"{s['accuracy']['model_vs_market_corr']:.3f}"),
+            ("Margin MAE (closing line: {:.2f})".format(a['accuracy']['market_margin_mae']), lambda s: f"{s['accuracy']['model_margin_mae']:.2f}"),
+            ("Spread picks on the underdog", lambda s: f"{s['dispersion']['underdog_share']:.0%}"),
+            ("Median spread edge", lambda s: f"{s['dispersion']['edge_median']:.1f}"),
+            ("Spread edges 3.5+", lambda s: f"{s['dispersion']['edge_ge_3_5']:.0%}"),
+            ("Spread edges 8+", lambda s: f"{s['dispersion']['edge_ge_8']:.0%}"),
+            ("Total picks on the over", lambda s: f"{s['over_share']:.1%}"),
+            ("ATS, all picks", lambda s: f"{s['spread']['All']['label']} ({s['spread']['All']['pct']:.1%})"),
+            ("ATS, 3.5+ tier", lambda s: f"{s['spread']['3.5+']['label']} ({s['spread']['3.5+']['pct']:.1%})"),
+            ("Totals, all picks", lambda s: f"{s['total']['All']['label']} ({s['total']['All']['pct']:.1%})"),
+            ("Totals, 3.5+ tier", lambda s: f"{s['total']['3.5+']['label']} ({s['total']['3.5+']['pct']:.1%})")]
+    L = ["## Spread compression: v1.0 → v1.1\n", COMPRESSION_WHY + "\n", "| | v1.0 | v1.1 |", "|---|---|---|"]
+    L += [f"| {lab} | {f(b)} | {f(a)} |" for lab, f in rows]
+    L += ["", "Spread edges of 8+ points are still common in v1.1. The model's margins now have the right scale, "
+          "but it explains less than the market does (margin MAE above the closing line's). When it disagrees with the market "
+          "by a touchdown, the backtest says that's usually the model missing information, not an edge.\n"]
+    return L
+
+
 def run_ncaaf(sensitivity=True):
     from nfledge import cfb_data
     from nfledge.sports import BY_KEY
@@ -230,6 +279,8 @@ def run_ncaaf(sensitivity=True):
     base = sport.params()
     bt = run(sched, tg, sport=sport, params=base, groups=groups)
     summary = summarize(bt)
+    v10 = {**base, "DECAY_NORMALIZE": False, "SCALE_CALIBRATION": False, "PRIOR_MODEL": None}
+    v1_0 = summarize(run(sched, tg, sport=sport, params=v10, groups=groups))
     before = summarize(run(sched, tg, sport=sport, params={**base, "TOTALS_CALIBRATION": False}, groups=groups))
     sens = [("**default**", summary)]
     if sensitivity:
@@ -237,10 +288,12 @@ def run_ncaaf(sensitivity=True):
             sm = summarize(run(sched, tg, sport=sport, params={**base, **ov}, groups=groups))
             sens.append((", ".join(f"{k}={v:g}" for k, v in ov.items()), sm))
     bt.to_csv(ROOT / "data" / "backtest_games_ncaaf.csv", index=False)
-    md = section("NCAAF backtest", summary, sens, before, config.NCAAF_BACKTEST_SEASONS,
+    md = section("NCAAF backtest (model v1.1)", summary, sens, before, config.NCAAF_BACKTEST_SEASONS,
                  "FBS vs FBS, regular season + bowls, games with a market line", "CFBD consensus",
                  ("Totals calibration: off → on", NCAAF_CALIB_WHY, ("uncalibrated", "calibrated")))
-    return md, _payload(summary, before, config.NCAAF_BACKTEST_SEASONS)
+    head, sep, rest = md.partition("## Against the spread")
+    md = head + "\n".join(_compression(v1_0, summary)) + "\n" + sep + rest
+    return md, {**_payload(summary, before, config.NCAAF_BACKTEST_SEASONS), "model_v1_0": v1_0}
 
 
 def main(only=None, sensitivity=True):

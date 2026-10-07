@@ -99,6 +99,15 @@ def load_schedules(refresh=True):
     return s
 
 
+def load_talent(seasons):
+    """{season: {team: 247 team talent composite}}. One call per season, cached (current season: 30 days)."""
+    out = {}
+    for season in seasons:
+        d = cfbd.get("/talent", {"year": season}, f"talent_{season}", max_age_hours=_cur_max_age(season, 24 * 30))
+        out[season] = {r["team"]: float(r["talent"]) for r in d if r.get("talent") is not None}
+    return out
+
+
 def groups_by_season(sched):
     out = {}
     for season, d in sched.groupby("season"):

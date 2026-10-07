@@ -74,7 +74,11 @@ NCAAF_MODEL = {
     "N_GROUPS": 2,
     "PLAYS_DEFAULT": 70.0,
     "FIRST_SEASON": NCAAF_FIRST_SEASON,
-    "VERSION": "cfb-epa-ridge-1.0",
+    # v1.1 (10/7/2026): fixes the spread compression found in v1.0 (model margins SD 5 vs market 13)
+    "DECAY_NORMALIZE": True,      # recency re-weights games instead of discarding evidence
+    "SCALE_CALIBRATION": True,    # walk-forward margin/total scale fit on actual results
+    "PRIOR_MODEL": "talent",      # preseason prior: last season + roster talent, coefficients walk-forward
+    "VERSION": "cfb-epa-ridge-1.1",
 }
 NCAAF_ODDS_API_SPORT = "americanfootball_ncaaf"
 NCAAF_FREEZE_POLICY_FROM = (2026, 7)   # week 6 (launch week) froze at first capture on 10/7
