@@ -1,0 +1,12 @@
+# Daily 7:00 AM Central. Install with: crontab -e  (paste one of the lines below)
+#
+# macOS cron uses the system time zone (no CRON_TZ). If your Mac is on Central time:
+0 7 * * * cd /Users/rb/projects/nfl-edge && AUTO_DEPLOY=1 LEDGER_AUTOCOMMIT=1 ./update.sh >> data/logs/update.log 2>&1
+#
+# Linux (cronie/vixie) supports CRON_TZ, which handles daylight saving correctly:
+# CRON_TZ=America/Chicago
+# 0 7 * * * cd /path/to/nfl-edge && AUTO_DEPLOY=1 LEDGER_AUTOCOMMIT=1 ./update.sh >> data/logs/update.log 2>&1
+#
+# Unattended deploys need CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in the environment
+# (e.g. export them in ~/.zprofile, which `zsh -l` loads in the launchd version).
+# On macOS, prefer the launchd plist in ops/: cron jobs don't run while the Mac sleeps.

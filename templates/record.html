@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "_macros.html" import result_chip %}
+{% block title %}{{ season }} Record · {{ cfg.BRAND_NAME }}{% endblock %}
+{% block content %}
+<section class="intro">
+  <p class="eyebrow">{{ season }} season · graded automatically from final scores</p>
+  <h1>Record</h1>
+  <p class="lede">Every pick is graded against the line we first captured and froze, never a later one. Closing line value (CLV) shows whether the market moved toward the pick after it was published.</p>
+</section>
+
+<section class="tiles">
+  {% for mkt, label in [('spread', 'Against the spread'), ('total', 'Totals')] %}
+  {% set r = rec[mkt].tiers.All %}
+  <div class="tile">
+    <div class="tile-label">{{ label }}</div>
+    <div class="tile-big num">{{ r.label if r.n or r.p else '0-0' }}</div>
+    <div class="tile-sub"><span class="num">{{ r.pct|pct }}</span> · <span class="num">{{ '%+.1f'|format(r.units) }}u</span> at −110</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">{{ 'Spread' if mkt == 'spread' else 'Total' }} CLV</div>
+    <div class="tile-big num">{{ rec[mkt].clv_avg|signed(2) if rec[mkt].clv_avg is not none else '—' }}</div>
+    <div class="tile-sub">avg pts vs. close{% if rec[mkt].clv_n %} · beat close <span class="num">{{ rec[mkt].clv_beat|pct }}</span> of {{ rec[mkt].clv_n }}{% endif %}</div>
+  </div>
+  {% endfor %}
+</section>
+
+<section class="panel">
+  <h2>By edge tier</h2>
+  <div class="tablewrap">
+  <table class="data">
+    <thead><tr><th>Tier</th><th>ATS</th><th>ATS %</th><th>Units</th><th>Totals</th><th>Totals %</th><th>Units</th></tr></thead>
+    <tbody>
+    {% for t in ['All'] + tiers %}
+      {% set s = rec.spread.tiers[t] %}{% set o = rec.total.tiers[t] %}
+      <tr{% if t == 'All' %} class="row-strong"{% endif %}>
+        <th scope="row">{{ t }}{% if t != 'All' %} pts{% endif %}</th>
+        <td class="num">{{ s.label }}</td><td class="num">{{ s.pct|pct }}</td><td class="num">{{ '%+.1f'|format(s.units) }}</td>
+        <td class="num">{{ o.label }}</td><td class="num">{{ o.pct|pct }}</td><td class="num">{{ '%+.1f'|format(o.units) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Every pick</h2>
+  <p class="fine">Times are Eastern. "Line" is the frozen line the pick is graded on. Download the raw <a href="{{ root }}ledger/graded.csv">graded.csv</a>.</p>
+  <div class="tablewrap">
+  <table class="data log">
+    <thead><tr>
+      <th>Wk</th><th>Game</th><th>Spread pick</th><th>Edge</th><th>Close</th><th>CLV</th><th>Res</th>
+      <th>Total pick</th><th>Edge</th><th>Close</th><th>CLV</th><th>Res</th>
+      <th>Score</th><th>Line first seen</th><th>Locked</th><th>Kickoff</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="num">{{ r.week }}</td>
+        <td><a href="{{ root }}game/{{ r.game_id }}.html">{{ r.away }} @ {{ r.home }}</a></td>
+        <td class="num">{{ r.spread_pick }} {{ r.spread_pick_line|line if r.spread_pick != 'PASS' else '' }}</td>
+        <td class="num">{{ r.spread_edge|num }}</td>
+        <td class="num">{% if r.close_home_spread == r.close_home_spread and r.close_home_spread is not none %}{{ r.home }} {{ r.close_home_spread|line }}{% else %}—{% endif %}</td>
+        <td class="num">{{ r.spread_clv|signed }}</td>
+        <td>{{ result_chip(r.spread_result) }}</td>
+        <td class="num">{{ r.total_pick|title }} {{ r.line_total|num }}</td>
+        <td class="num">{{ r.total_edge|num }}</td>
+        <td class="num">{{ r.close_total|num }}</td>
+        <td class="num">{{ r.total_clv|signed }}</td>
+        <td>{{ result_chip(r.total_result) }}</td>
+        <td class="num">{% if r.final == true %}{{ r.away_score|int }}–{{ r.home_score|int }}{% else %}—{% endif %}</td>
+        <td class="ts">{{ r.line_fetched_at|ts }}</td>
+        <td class="ts">{{ r.locked_at|ts }}</td>
+        <td class="ts">{{ r.kickoff_utc|ts }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="16" class="note">No picks locked yet this season.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

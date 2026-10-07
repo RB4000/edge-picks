@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_macros.html" import game_card %}
+{% block title %}{{ cfg.BRAND_NAME }} · Week {{ week }} {{ season }}{% endblock %}
+{% block content %}
+<section class="intro">
+  <p class="eyebrow">{{ season }} season</p>
+  <h1>Week {{ week }}</h1>
+  <p class="lede">{{ cfg.BRAND_TAGLINE }}</p>
+  {% if snap %}<p class="fine">Ratings fit {{ snap.fit_at|ts }} on data through {{ snap.data_through }} · model {{ snap.model_version }}</p>{% endif %}
+  <nav class="weeknav" aria-label="Weeks">
+    {% for n in nav %}<a href="{{ root }}{{ n.href }}" {% if n.current %}aria-current="page"{% endif %}>W{{ n.week }}</a>{% endfor %}
+  </nav>
+  <dl class="legend">
+    <div><dt><span class="edgebar t1" style="--e:.25"><span></span></span></dt><dd>edge &lt; 2</dd></div>
+    <div><dt><span class="edgebar t2" style="--e:.45"><span></span></span></dt><dd>2–3.5</dd></div>
+    <div><dt><span class="edgebar t3" style="--e:.8"><span></span></span></dt><dd>3.5+</dd></div>
+  </dl>
+</section>
+{% for day in days %}
+<section class="day">
+  <h2 class="day-label">{{ day.label }}</h2>
+  <div class="grid">
+    {% for g in day.games %}{{ game_card(g, root) }}{% endfor %}
+  </div>
+</section>
+{% else %}
+<p class="note">No games scheduled.</p>
+{% endfor %}
+{% endblock %}

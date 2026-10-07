@@ -1,0 +1,73 @@
+{% macro team_line(abbr, rec, score, proj, final, winner) -%}
+<div class="tl{% if final and winner %} tl-win{% endif %}">
+  <img class="logo" src="{{ logo(abbr) }}" alt="" width="32" height="32" loading="lazy">
+  <span class="tl-name"><span class="tl-full">{{ full_name(abbr) }}</span><span class="tl-abbr">{{ abbr }}</span></span>
+  <span class="tl-rec">{{ rec }}</span>
+  {% if final %}<span class="tl-final num">{{ score }}</span>{% endif %}
+  <span class="tl-proj num" title="Model projected score">{{ proj|num }}</span>
+</div>
+{%- endmacro %}
+
+{% macro result_chip(r) -%}
+{% if r == 'W' %}<span class="chip chip-w">Win</span>{% elif r == 'L' %}<span class="chip chip-l">Loss</span>{% elif r == 'P' %}<span class="chip chip-p">Push</span>{% endif %}
+{%- endmacro %}
+
+{% macro edgebar(edge, slug) -%}
+<span class="edgebar {{ slug }}" style="--e: {{ [edge / 7.0, 1.0]|min }}" aria-hidden="true"><span></span></span>
+{%- endmacro %}
+
+{% macro game_card(g, root) -%}
+{% set p = g.pick %}
+<article class="card status-{{ g.status }}">
+  <header class="card-head">
+    <span class="kick">{{ g.time_label }}{% if g.neutral %} · neutral site{% endif %}</span>
+    {% if g.status == 'locked' %}<span class="lock" title="Pick locked {{ p.locked_at|ts }} against the line first seen {{ p.line_fetched_at|ts }}">Locked {{ p.locked_at|ts }}</span>{% endif %}
+  </header>
+  <div class="matchup">
+    {% if p %}
+      {{ team_line(g.away, g.away_rec, g.away_score, p.model_away_pts, g.final, g.final and g.away_score > g.home_score) }}
+      {{ team_line(g.home, g.home_rec, g.home_score, p.model_home_pts, g.final, g.final and g.home_score > g.away_score) }}
+      <div class="proj-label">{% if g.final %}final · {% endif %}model proj.</div>
+    {% else %}
+      {{ team_line(g.away, g.away_rec, g.away_score, none, g.final, g.final and g.away_score > g.home_score) }}
+      {{ team_line(g.home, g.home_rec, g.home_score, none, g.final, g.final and g.home_score > g.away_score) }}
+    {% endif %}
+  </div>
+  {% if p %}
+  <table class="lines">
+    <thead><tr><th></th><th>Market</th><th>Model</th><th>Pick</th></tr></thead>
+    <tbody>
+      <tr>
+        <th scope="row">Spread</th>
+        <td class="num">{{ g.home }} {{ p.line_home_spread|line }}</td>
+        <td class="num">{{ g.home }} {{ p.model_home_spread|line }}</td>
+        <td class="pick-cell">
+          {% if p.spread_pick != 'PASS' %}
+          <span class="pick num">{{ p.spread_pick }} {{ p.spread_pick_line|line }}</span>
+          <span class="edge"><span class="num">{{ p.spread_edge|num }}</span> pts {{ edgebar(p.spread_edge, p.spread_tier_slug) }}</span>
+          {{ result_chip(p.spread_result) }}
+          {% else %}<span class="muted">No edge</span>{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th scope="row">Total</th>
+        <td class="num">{{ p.line_total|num }}</td>
+        <td class="num">{{ p.model_total|num }}</td>
+        <td class="pick-cell">
+          {% if p.total_pick != 'PASS' %}
+          <span class="pick num">{{ 'Over' if p.total_pick == 'OVER' else 'Under' }} {{ p.line_total|num }}</span>
+          <span class="edge"><span class="num">{{ p.total_edge|num }}</span> pts {{ edgebar(p.total_edge, p.total_tier_slug) }}</span>
+          {{ result_chip(p.total_result) }}
+          {% else %}<span class="muted">No edge</span>{% endif %}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  {% elif g.status == 'pending' %}
+  <p class="note">No pick yet. It locks on the first update after a market line is captured and every earlier game's play-by-play is in.</p>
+  {% else %}
+  <p class="note">No pick: a line wasn't captured before kickoff, so nothing was published.</p>
+  {% endif %}
+  <a class="card-link" href="{{ root }}game/{{ g.id }}.html">Breakdown <span aria-hidden="true">→</span></a>
+</article>
+{%- endmacro %}

@@ -1,0 +1,32 @@
+"""Single source of configuration. Rename the brand here and every page follows."""
+
+# --- Brand ------------------------------------------------------------------
+BRAND_NAME = "BRAND_NAME"
+BRAND_TAGLINE = "An opponent-adjusted EPA model. Every pick timestamped, locked, and graded in public."
+SITE_URL = ""  # e.g. "https://example.pages.dev" -- used for canonical/OG tags if set
+DISCLAIMER = (
+    "Model output is published for entertainment and informational purposes only. "
+    "It is not betting advice. Past results do not guarantee future results."
+)
+RESPONSIBLE_GAMBLING = "If you or someone you know has a gambling problem, call 1-800-GAMBLER."
+
+# --- Data -------------------------------------------------------------------
+FIRST_SEASON = 2021          # earliest season pulled from nflverse
+CURRENT_SEASON = 2026
+BACKTEST_SEASONS = [2022, 2023, 2024, 2025]
+
+# --- Model (fixed a priori; NOT tuned on the backtest) -----------------------
+HALF_LIFE_WEEKS = 6.0        # within-season recency decay half-life, in weeks
+PRIOR_REGRESSION = 0.6       # last season's team ratings carried into the new season (rest regresses to avg)
+PRIOR_PLAYS = 300.0          # weight of the prior on each team rating, in plays (~5 games of offense)
+LEAGUE_PRIOR_PLAYS = 15000.0 # weight of the prior on league-wide terms (avg EPA, HFA), ~half a season
+PACE_PRIOR_GAMES = 5.0       # weight of the prior on each team's pace rating, in games
+GARBAGE_WP = (0.10, 0.90)    # 4th-quarter plays outside this win-prob band are excluded from EPA
+
+# Edge tiers, in points. Lower bound inclusive.
+TIERS = [("<2", 0.0, 2.0), ("2-3.5", 2.0, 3.5), ("3.5+", 3.5, 99.0)]
+
+# --- Market lines -------------------------------------------------------------
+ODDS_API_SPORT = "americanfootball_nfl"
+ODDS_API_MIN_REFRESH_HOURS = 3   # don't burn free-tier credits on rapid re-runs
+TIMEZONE_DISPLAY = "America/New_York"

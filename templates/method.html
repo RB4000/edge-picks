@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Method · {{ cfg.BRAND_NAME }}{% endblock %}
+{% block content %}
+<section class="intro">
+  <p class="eyebrow">How the numbers are made</p>
+  <h1>Method</h1>
+  <p class="lede">One model, written down in advance, run the same way every week. No hand-entered picks, no edited lines.</p>
+</section>
+
+<section class="panel prose">
+  <h2>1. Efficiency: opponent-adjusted EPA per play</h2>
+  <p>Every snap since {{ cfg.FIRST_SEASON }} carries an <em>expected points added</em> (EPA) value from nflverse: how much the play changed the offense's expected points. We average it per team per game, dropping late-game snaps where the outcome is already settled (win probability outside {{ (cfg.GARBAGE_WP[0]*100)|int }}–{{ (cfg.GARBAGE_WP[1]*100)|int }}% in the 4th quarter).</p>
+  <p>Raw EPA is misleading if you've played soft defenses, so a weighted ridge regression solves for every team's offensive and defensive rating at once. Each game's EPA/play is modeled as league average + offense rating + opponent defense rating + home/road term. Games are weighted by snaps and recency (half-life {{ cfg.HALF_LIFE_WEEKS|int }} weeks).</p>
+  <h2>2. A prior instead of a blank slate</h2>
+  <p>Each season starts from last season's final ratings, pulled {{ ((1 - cfg.PRIOR_REGRESSION) * 100)|int }}% back toward average to account for roster turnover. That prior carries the weight of about {{ (cfg.PRIOR_PLAYS / 62)|round|int }} games of data. By midseason the current year dominates.</p>
+  <h2>3. Pace</h2>
+  <p>The same regression structure, run on offensive plays per game, gives each team a pace rating for its offense and for what its defense allows. Projected plays × projected efficiency is what drives the total.</p>
+  <h2>4. Points and home field</h2>
+  <p>Projected efficiency and plays turn into points through a fit on every game since {{ cfg.FIRST_SEASON }}. Home field is <em>estimated</em>, not assumed: it's the average home margin in non-neutral games, with recent seasons weighted more. It moves as the league changes.</p>
+  <h2>5. Picks</h2>
+  <p>Model spread and total are compared with the market line. The difference is the edge, and the pick is whichever side the model prefers. Edges are grouped into tiers: under 2 points, 2–3.5, and 3.5+.</p>
+  <h2>6. The rules</h2>
+  <ul>
+    <li>The first market line we capture for a game is frozen. Picks are graded against it, never against a later number.</li>
+    <li>A pick is generated and locked once, before kickoff, after every earlier game's play-by-play is in. It is never revised.</li>
+    <li>The ratings used for each week are published as a file next to the picks.</li>
+    <li>Closing lines are recorded after kickoff so closing line value can be measured.</li>
+    <li>The full ledger is published as CSV and committed to version control.</li>
+  </ul>
+  <h2>What the model doesn't know</h2>
+  <p>Injuries, quarterback changes, weather, travel and motivation, except as they've already shown up in play-by-play. When the model disagrees sharply with the market, the market is often pricing exactly those things.</p>
+</section>
+
+{% if bt %}
+<section class="panel">
+  <h2>Backtest, {{ bt.seasons[0] }}–{{ bt.seasons[-1] }}</h2>
+  <p class="fine">Walk-forward: before each week, ratings were refit using only earlier games. {{ bt.n_games }} games, graded against <strong>closing</strong> lines (the hardest number to beat) at −110. Parameters were fixed before the backtest and not tuned to it.</p>
+  <div class="tablewrap">
+  <table class="data">
+    <thead><tr><th>Tier</th><th>ATS</th><th>ATS %</th><th>Units</th><th>Totals</th><th>Totals %</th><th>Units</th></tr></thead>
+    <tbody>
+    {% for t in ['All'] + tiers %}
+      {% set s = bt.spread[t] %}{% set o = bt.total[t] %}
+      <tr{% if t == 'All' %} class="row-strong"{% endif %}>
+        <th scope="row">{{ t }}{% if t != 'All' %} pts{% endif %}</th>
+        <td class="num">{{ s.label }}</td><td class="num">{{ s.pct|pct }}</td><td class="num">{{ '%+.1f'|format(s.units) }}</td>
+        <td class="num">{{ o.label }}</td><td class="num">{{ o.pct|pct }}</td><td class="num">{{ '%+.1f'|format(o.units) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="tablewrap">
+  <table class="data">
+    <thead><tr><th>Season</th><th>ATS</th><th>ATS %</th><th>Totals</th><th>Totals %</th></tr></thead>
+    <tbody>
+    {% for s, d in bt.by_season.items() %}
+      <tr><th scope="row">{{ s }}</th><td class="num">{{ d.spread.label }}</td><td class="num">{{ d.spread.pct|pct }}</td><td class="num">{{ d.total.label }}</td><td class="num">{{ d.total.pct|pct }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="fine">Mean absolute error on game margin: model {{ bt.accuracy.model_margin_mae|num(2) }} pts vs. closing line {{ bt.accuracy.market_margin_mae|num(2) }}. On totals: {{ bt.accuracy.model_total_mae|num(2) }} vs. {{ bt.accuracy.market_total_mae|num(2) }}. Break-even at −110 is 52.4%. Full report with confidence intervals and parameter sensitivity: <a href="{{ root }}ledger/backtest_results.md">backtest_results.md</a>.</p>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Parameters</h2>
+  <dl class="audit">
+    <div><dt>Model version</dt><dd class="num">{{ version }}</dd></div>
+    {% for k, v in params.items() %}<div><dt>{{ k }}</dt><dd class="num">{{ v }}</dd></div>{% endfor %}
+  </dl>
+</section>
+{% endblock %}

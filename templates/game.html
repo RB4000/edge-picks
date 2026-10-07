@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% from "_macros.html" import result_chip, edgebar %}
+{% block title %}{{ g.away }} @ {{ g.home }} · Week {{ week }} · {{ cfg.BRAND_NAME }}{% endblock %}
+{% block content %}
+{% set p = g.pick %}
+<p class="crumb"><a href="{{ root }}week/{{ season }}-{{ '%02d' % week }}.html">← Week {{ week }}</a></p>
+<section class="game-hero">
+  <p class="eyebrow">{{ g.day_label }} · {{ g.time_label }}{% if g.stadium %} · {{ g.stadium }}{% endif %}</p>
+  <div class="hero-teams">
+    {% for side in ('away', 'home') %}
+    {% set abbr = g[side] %}
+    <div class="hero-team">
+      <img src="{{ logo(abbr) }}" alt="" width="64" height="64">
+      <div class="hero-name">{{ full_name(abbr) }}</div>
+      <div class="hero-rec">{{ g[side ~ '_rec'] }}{% if side == 'home' and not g.neutral %} · home{% endif %}</div>
+      {% if p %}<div class="hero-score num">{{ p['model_' ~ side ~ '_pts']|num }}</div>{% endif %}
+      {% if g.final %}<div class="hero-final">Final: <span class="num">{{ g[side ~ '_score'] }}</span></div>{% endif %}
+    </div>
+    {% if side == 'away' %}<div class="hero-at">@</div>{% endif %}
+    {% endfor %}
+  </div>
+</section>
+
+{% if p %}
+<section class="panel">
+  <h2>The pick</h2>
+  <div class="pickpair">
+    <div class="pickbox">
+      <div class="pb-label">Spread</div>
+      {% if p.spread_pick != 'PASS' %}
+      <div class="pb-pick num">{{ p.spread_pick }} {{ p.spread_pick_line|line }}</div>
+      <div class="pb-edge">Edge <span class="num">{{ p.spread_edge|num }}</span> pts · tier {{ p.spread_tier }} {{ edgebar(p.spread_edge, p.spread_tier_slug) }}</div>
+      {% else %}<div class="pb-pick">No edge</div>{% endif %}
+      <div class="pb-cmp">Market {{ g.home }} <span class="num">{{ p.line_home_spread|line }}</span> · Model {{ g.home }} <span class="num">{{ p.model_home_spread|line }}</span></div>
+      {{ result_chip(p.spread_result) }}
+    </div>
+    <div class="pickbox">
+      <div class="pb-label">Total</div>
+      {% if p.total_pick != 'PASS' %}
+      <div class="pb-pick num">{{ 'Over' if p.total_pick == 'OVER' else 'Under' }} {{ p.line_total|num }}</div>
+      <div class="pb-edge">Edge <span class="num">{{ p.total_edge|num }}</span> pts · tier {{ p.total_tier }} {{ edgebar(p.total_edge, p.total_tier_slug) }}</div>
+      {% else %}<div class="pb-pick">No edge</div>{% endif %}
+      <div class="pb-cmp">Market <span class="num">{{ p.line_total|num }}</span> · Model <span class="num">{{ p.model_total|num }}</span></div>
+      {{ result_chip(p.total_result) }}
+    </div>
+  </div>
+  <dl class="audit">
+    <div><dt>Line graded on</dt><dd>{{ g.home }} <span class="num">{{ p.line_home_spread|line }}</span>, total <span class="num">{{ p.line_total|num }}</span></dd></div>
+    <div><dt>Line source</dt><dd>{{ p.line_source }}</dd></div>
+    <div><dt>Line first seen</dt><dd>{{ p.line_fetched_at|ts }}</dd></div>
+    <div><dt>Pick locked</dt><dd>{{ p.locked_at|ts }}</dd></div>
+    <div><dt>Kickoff</dt><dd>{{ p.kickoff_utc|ts }}</dd></div>
+    {% if p.close_home_spread == p.close_home_spread and p.close_home_spread is not none %}
+    <div><dt>Closing line</dt><dd>{{ g.home }} <span class="num">{{ p.close_home_spread|line }}</span>, total <span class="num">{{ p.close_total|num }}</span></dd></div>
+    <div><dt>Closing line value</dt><dd>spread <span class="num">{{ p.spread_clv|signed }}</span> · total <span class="num">{{ p.total_clv|signed }}</span></dd></div>
+    {% endif %}
+    <div><dt>Model</dt><dd class="num">{{ p.model_version }} · <a href="{{ root }}ledger/ratings/{{ p.ratings_file }}">ratings file</a></dd></div>
+  </dl>
+</section>
+{% endif %}
+
+{% if ex %}
+<section class="panel">
+  <h2>What's driving the number</h2>
+  <div class="compare">
+    <div class="cmp-head"><span></span><span>{{ g.away }}</span><span>{{ g.home }}</span></div>
+    {% set A = ex.teams.away %}{% set H = ex.teams.home %}
+    {% for label, key, rk, fmt, note in [
+        ('Offense EPA/play', 'off_epa', 'off_rank', 3, 'opponent-adjusted, vs. avg'),
+        ('Defense EPA/play allowed', 'def_epa', 'def_rank', 3, 'lower is better'),
+        ('Plays per game', 'pace_off', 'pace_rank', 1, 'offensive snaps'),
+      ] %}
+    <div class="cmp-row">
+      <span class="cmp-label">{{ label }}<small>{{ note }}</small></span>
+      <span class="cmp-val"><span class="num">{{ A[key]|signed(fmt) if fmt == 3 else A[key]|num }}</span><span class="rank rk-{{ ((A[rk] - 1) // 8) }}">{{ A[rk]|ordinal }}</span></span>
+      <span class="cmp-val"><span class="num">{{ H[key]|signed(fmt) if fmt == 3 else H[key]|num }}</span><span class="rank rk-{{ ((H[rk] - 1) // 8) }}">{{ H[rk]|ordinal }}</span></span>
+    </div>
+    {% endfor %}
+    <div class="cmp-row">
+      <span class="cmp-label">Seconds per play<small>neutral situations</small></span>
+      <span class="cmp-val"><span class="num">{{ A.spp|num }}</span>{% if A.spp_rank %}<span class="rank rk-{{ ((A.spp_rank - 1) // 8) }}">{{ A.spp_rank|ordinal }}</span>{% endif %}</span>
+      <span class="cmp-val"><span class="num">{{ H.spp|num }}</span>{% if H.spp_rank %}<span class="rank rk-{{ ((H.spp_rank - 1) // 8) }}">{{ H.spp_rank|ordinal }}</span>{% endif %}</span>
+    </div>
+    <div class="cmp-row">
+      <span class="cmp-label">Home field<small>points, estimated from results</small></span>
+      <span class="cmp-val num">—</span>
+      <span class="cmp-val num">{{ '—' if g.neutral else ex.league.hfa_pts|signed }}</span>
+    </div>
+  </div>
+  <div class="prose">
+    {% for s in ex.sentences %}<p>{{ s }}</p>{% endfor %}
+  </div>
+  <p class="fine">Ranks are out of 32 and come from the ratings snapshot used to lock this week's picks ({{ snap.data_through }}). Games played this season: {{ g.away }} {{ A.games }}, {{ g.home }} {{ H.games }}. Early in the season, ratings lean on last season's numbers (regressed toward average).</p>
+</section>
+{% else %}
+<section class="panel"><p class="note">Ratings for this week haven't been fit yet. They're published with the first locked pick.</p></section>
+{% endif %}
+{% endblock %}
