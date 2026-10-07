@@ -4,6 +4,11 @@
 {% block content %}
 {% set p = g.pick %}
 <p class="crumb"><a href="{{ root }}week/{{ season }}-{{ '%02d' % week }}.html">← Week {{ week }}</a></p>
+{% if g.neutral %}
+<p class="notice"><strong>Neutral site{% if g.stadium %} · {{ g.stadium }}{% endif %}.</strong>
+{% if ex and not ex.neutral_used %}This pick was locked under model v1.0, which followed nflverse's "home" designation and gave {{ g.home }} {{ ex.league.hfa_pts|num }} points of home field. It is graded exactly as locked. From Week 6, international and neutral-site games get zero home field.
+{% else %}No home-field advantage is applied.{% endif %}</p>
+{% endif %}
 <section class="game-hero">
   <p class="eyebrow">{{ g.day_label }} · {{ g.time_label }}{% if g.stadium %} · {{ g.stadium }}{% endif %}</p>
   <div class="hero-teams">
@@ -47,7 +52,7 @@
   <dl class="audit">
     <div><dt>Line graded on</dt><dd>{{ g.home }} <span class="num">{{ p.line_home_spread|line }}</span>, total <span class="num">{{ p.line_total|num }}</span></dd></div>
     <div><dt>Line source</dt><dd>{{ p.line_source }}</dd></div>
-    <div><dt>Line first seen</dt><dd>{{ p.line_fetched_at|ts }}</dd></div>
+    <div><dt>Line frozen</dt><dd>{{ p.line_fetched_at|captured }}{% if (season, week) < cfg.FREEZE_POLICY_FROM %} · launch-week capture, before the Tuesday 7am CT freeze rule{% endif %}</dd></div>
     <div><dt>Pick locked</dt><dd>{{ p.locked_at|ts }}</dd></div>
     <div><dt>Kickoff</dt><dd>{{ p.kickoff_utc|ts }}</dd></div>
     {% if p.close_home_spread == p.close_home_spread and p.close_home_spread is not none %}
@@ -84,7 +89,7 @@
     <div class="cmp-row">
       <span class="cmp-label">Home field<small>points, estimated from results</small></span>
       <span class="cmp-val num">—</span>
-      <span class="cmp-val num">{{ '—' if g.neutral else ex.league.hfa_pts|signed }}</span>
+      <span class="cmp-val num">{{ '—' if ex.neutral_used else ex.league.hfa_pts|signed }}</span>
     </div>
   </div>
   <div class="prose">

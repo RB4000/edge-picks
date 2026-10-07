@@ -5,7 +5,8 @@ The daily 7am CT job does the work. This is the human part, about 15 minutes on 
 ## Tuesday morning
 
 - [ ] **Check the job ran:** `tail -40 data/logs/update.log`
-  - Want to see: `current week: 2026 week N`, `N newly frozen`, `ratings: wrote 2026_wNN.json`, `N newly locked`.
+  - Want to see: `freeze window opened Tue … 7:00 AM`, `N newly frozen`, `ratings: wrote 2026_wNN.json`, `N newly locked`.
+  - Lines freeze at the first capture on or after **7:00 AM CT Tuesday**. If the Mac was asleep at 7, they freeze on the first run after it wakes. That's still correct, just later. Check the "Frozen line" timestamps on the record page.
   - If it says `not locking yet — play-by-play not yet published`, nflverse hasn't posted Monday night's game. Nothing to do: Wednesday's run will lock. (Or run `make update` later in the day.)
 - [ ] **Read the sheet:** `make sheet`
   - Every game should show a pick. "no pick locked" means no line was captured yet (rare: usually a flexed game or a late-posted line).

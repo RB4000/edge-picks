@@ -10,7 +10,7 @@
 import argparse
 import fcntl
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -57,19 +57,48 @@ def ready_to_lock(sched, team_games, season, week):
     return True, ""
 
 
-def capture_lines(sched, season, week, now):
+def freeze_open(sched, season, week):
+    """UTC time a week's freeze window opens: FREEZE_HOUR (Central) on the Tuesday before the week's
+    first kickoff. None for weeks before FREEZE_POLICY_FROM (those froze at first capture)."""
+    if (season, week) < config.FREEZE_POLICY_FROM:
+        return None
+    wk = sched[(sched["season"] == season) & (sched["week"] == week)]
+    if wk.empty:
+        return None
+    tz = ZoneInfo(config.FREEZE_TZ)
+    first = wk["kickoff_utc"].min().tz_convert(tz).date()
+    back = (first.weekday() - config.FREEZE_WEEKDAY) % 7 or 7
+    day = first - timedelta(days=back)
+    return datetime(day.year, day.month, day.day, config.FREEZE_HOUR, tzinfo=tz).astimezone(timezone.utc)
+
+
+def capture_lines(sched, season, week, now, only_if_open=False):
+    """Snapshot lines for a week's upcoming games; freeze those captured inside the freeze window."""
     wk = sched[(sched["season"] == season) & (sched["week"] == week)]
     upcoming = wk[wk["kickoff_utc"] > now]
     if upcoming.empty:
         return
-    got = lines.fetch(sched[sched["season"] == season], season, week, log=log)
+    opens = freeze_open(sched, season, week)
+    window_open = opens is None or now >= opens
+    if only_if_open and not window_open:
+        return
+    if opens is not None:
+        log(f"  week {week}: freeze window {'opened' if window_open else 'opens'} {fmt_local(opens)}")
+    got = lines.fetch(sched[sched["season"] == season], season, week, log=log,
+                      not_before=opens if window_open else None)
     got = got[got["game_id"].isin(upcoming["game_id"])]
     run_at = utc_iso(now)
     seen = set(zip(*[ledger.read("line_snapshots")[c] for c in ("game_id", "fetched_at")])) or set()
     snaps = [{**r, "run_at": run_at} for r in got.to_dict("records") if (r["game_id"], r["fetched_at"]) not in seen]
     n_snap = ledger.append("line_snapshots", snaps, unique=False)
-    n_frz = ledger.append("frozen_lines", [{**r, "frozen_at": run_at} for r in got.to_dict("records")])
-    log(f"  lines: {n_snap} snapshots recorded, {n_frz} newly frozen")
+    freezable = [r for r in got.to_dict("records")
+                 if opens is None or pd.Timestamp(r["fetched_at"]) >= pd.Timestamp(opens)]
+    n_frz = ledger.append("frozen_lines", [{**r, "frozen_at": run_at} for r in freezable])
+    log(f"  week {week} lines: {n_snap} snapshots recorded, {n_frz} newly frozen")
+
+
+def fmt_local(dt):
+    return dt.astimezone(ZoneInfo(config.FREEZE_TZ)).strftime("%a %b %-d %-I:%M %p %Z")
 
 
 def lock_picks(sched, team_games, season, week, now):
@@ -79,7 +108,7 @@ def lock_picks(sched, team_games, season, week, now):
         return
     snap = ledger.read_ratings(season, week)
     if snap is None:
-        fit = ratings.RatingsEngine(team_games).as_of(season, week)
+        fit = ratings.RatingsEngine(team_games, sched).as_of(season, week)
         thru = team_games[(team_games["season"] == season) & (team_games["week"] < week)]
         snap = ratings.fit_to_dict(fit, {
             "season": season, "week": week, "fit_at": utc_iso(now),
@@ -180,6 +209,7 @@ def update(build=True, refresh=True):
     else:
         log(f"current week: {season} week {week}")
         capture_lines(sched, season, week, now)
+        capture_lines(sched, season, week + 1, now, only_if_open=True)  # e.g. Tue 7am before MNF is final
         lock_picks(sched, tg, season, week, now)
     record_closing(sched, now)
     g = graded(sched)

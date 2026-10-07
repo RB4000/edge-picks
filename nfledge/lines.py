@@ -54,13 +54,15 @@ def _match(schedule, home, away, when_utc):
 
 # --- The Odds API --------------------------------------------------------------
 
-def _odds_api_raw():
-    """Returns (payload, fetched_at). Reuses a recent response to conserve free-tier credits."""
+def _odds_api_raw(not_before=None):
+    """Returns (payload, fetched_at). Reuses a recent response to conserve free-tier credits,
+    unless it was fetched before `not_before` (e.g. before the Tuesday freeze window opened)."""
     latest = CACHE / "odds_api_latest.json"
     if latest.exists():
         cached = json.loads(latest.read_text())
-        age = _now() - datetime.fromisoformat(cached["fetched_at"].replace("Z", "+00:00"))
-        if age < timedelta(hours=config.ODDS_API_MIN_REFRESH_HOURS):
+        fetched = datetime.fromisoformat(cached["fetched_at"].replace("Z", "+00:00"))
+        fresh_enough = not_before is None or fetched >= not_before
+        if _now() - fetched < timedelta(hours=config.ODDS_API_MIN_REFRESH_HOURS) and fresh_enough:
             return cached["payload"], cached["fetched_at"]
     _load_env()
     key = os.environ.get("ODDS_API_KEY")
@@ -78,8 +80,8 @@ def _odds_api_raw():
     return r.json(), fetched_at
 
 
-def from_odds_api(schedule):
-    payload, fetched_at = _odds_api_raw()
+def from_odds_api(schedule, not_before=None):
+    payload, fetched_at = _odds_api_raw(not_before)
     return _parse_odds_payload(schedule, payload, fetched_at, "The Odds API")
 
 
@@ -142,10 +144,10 @@ def from_cache(schedule):
     return _parse_odds_payload(schedule, cached["payload"], cached["fetched_at"], "The Odds API (cached)")
 
 
-def fetch(schedule, season, week, log=print):
+def fetch(schedule, season, week, log=print, not_before=None):
     """Try each source in order; fill gaps from later sources. Returns one row per game_id."""
     frames = []
-    for name, fn in (("odds_api", lambda: from_odds_api(schedule)),
+    for name, fn in (("odds_api", lambda: from_odds_api(schedule, not_before)),
                      ("espn", lambda: from_espn(schedule, season, week)),
                      ("cache", lambda: from_cache(schedule))):
         try:

@@ -23,6 +23,22 @@ LEAGUE_PRIOR_PLAYS = 15000.0 # weight of the prior on league-wide terms (avg EPA
 PACE_PRIOR_GAMES = 5.0       # weight of the prior on each team's pace rating, in games
 GARBAGE_WP = (0.10, 0.90)    # 4th-quarter plays outside this win-prob band are excluded from EPA
 
+# Totals: model points are mean projections, but NFL totals skew right and market totals sit near
+# the median, which produced a systematic over lean in v1.0. When enabled, model totals are shifted
+# by the recency-weighted median of (model total - market total) over all games played before the
+# prediction week (walk-forward; no lookahead). Margins/spreads are unaffected.
+TOTALS_CALIBRATION = True
+
+# Home field: "venue" = zero HFA when nflverse says Neutral OR the venue is international/neutral
+# (nflverse marks some London "home" games as Home). "nflverse" = v1.0 behavior.
+NEUTRAL_RULE = "venue"
+INTERNATIONAL_STADIUM_IDS = {"LON00", "LON01", "LON02", "GER00", "MUN01", "FRA00", "MEX00", "SAO00",
+                             "RIO00", "MAD01", "PAR00", "MEL00", "DUB00", "IRE00", "BER00"}
+INTERNATIONAL_VENUE_WORDS = ["Tottenham", "Wembley", "Allianz", "Bayern", "Deutsche Bank Park", "Azteca",
+                             "Banorte", "Corinthians", "Maracana", "Bernabeu", "Stade de France",
+                             "Melbourne", "Croke", "Olympiastadion"]
+NEUTRAL_OVERRIDES = {}  # game_id -> True/False, for anything the rules above get wrong
+
 # Edge tiers, in points. Lower bound inclusive.
 TIERS = [("<2", 0.0, 2.0), ("2-3.5", 2.0, 3.5), ("3.5+", 3.5, 99.0)]
 
@@ -30,3 +46,11 @@ TIERS = [("<2", 0.0, 2.0), ("2-3.5", 2.0, 3.5), ("3.5+", 3.5, 99.0)]
 ODDS_API_SPORT = "americanfootball_nfl"
 ODDS_API_MIN_REFRESH_HOURS = 3   # don't burn free-tier credits on rapid re-runs
 TIMEZONE_DISPLAY = "America/New_York"
+
+# Line freeze: from FREEZE_POLICY_FROM onward, a game's frozen line is the first capture at or after
+# 7:00 AM Central on the Tuesday before that week's first kickoff. Earlier captures are logged as
+# snapshots but never frozen.
+FREEZE_POLICY_FROM = (2026, 6)
+FREEZE_WEEKDAY = 1            # Monday=0, Tuesday=1
+FREEZE_HOUR = 7
+FREEZE_TZ = "America/Chicago"

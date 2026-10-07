@@ -110,6 +110,9 @@ table.lines { width: 100%; border-collapse: collapse; margin: 8px 0 4px; font-si
 .card-link:hover { color: var(--accent); }
 
 /* game page --------------------------------------------------------------- */
+.notice { margin: 16px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid var(--accent-dim); border-radius: 8px; background: var(--surface); color: var(--muted); font-size: 13.5px; }
+.notice strong { color: var(--text); font-weight: 500; }
+.footnote { color: var(--muted); }
 .crumb { margin: 18px 0 0; font-size: 13px; }
 .crumb a { color: var(--muted); text-decoration: none; }
 .game-hero { padding: 16px 0 6px; }

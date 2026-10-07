@@ -27,7 +27,7 @@ cancels out of that average. The EPA hfa term is still fit so ratings aren't bia
 home-heavy or road-heavy early schedules.
 """
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 
 import numpy as np
@@ -75,6 +75,7 @@ class Fit:
     pace: np.ndarray           # [mu_p, pace_off*32, pace_def*32, hfa_p]
     pts: tuple = (0.0, 0.0, 0.0)  # (a, b, c): points = a + b*plays + c*plays*epa
     hfa_pts: float = 0.0       # home field advantage in points (full margin swing)
+    total_offset: float = 0.0  # subtracted from projected totals (see config.TOTALS_CALIBRATION)
     sec_per_play: dict = field(default_factory=dict)
     games_played: dict = field(default_factory=dict)
 
@@ -141,8 +142,12 @@ def _sec_per_play(cur, prev):
 class RatingsEngine:
     """Produces point-in-time fits using only games before (season, week)."""
 
-    def __init__(self, team_games):
+    CALIB_START = (config.FIRST_SEASON, 4)  # skip the first weeks of data, when there is no prior at all
+
+    def __init__(self, team_games, schedules=None):
+        """Pass `schedules` to enable totals calibration (needs past market totals)."""
         self.tg = team_games.dropna(subset=["points"]).copy()
+        self.sched = schedules
 
     @lru_cache(maxsize=None)
     def end_of_season(self, season) -> Fit | None:
@@ -156,6 +161,37 @@ class RatingsEngine:
         return Fit(eff=eff, pace=pace)
 
     def as_of(self, season, week) -> Fit:
+        fit = self._raw_as_of(season, week)
+        if self.sched is None or not config.TOTALS_CALIBRATION:
+            return fit
+        return replace(fit, total_offset=self.total_offset(season, week))
+
+    def total_offset(self, season, week):
+        """Recency-weighted median of (model total - market total) over every game before (season, week).
+        Each earlier season gets half the weight of the next, matching the HFA estimate."""
+        s = self.sched
+        past = s[s["final"] & s["close_total"].notna()
+                 & ((s["season"] < season) | ((s["season"] == season) & (s["week"] < week)))
+                 & ((s["season"] > self.CALIB_START[0]) | (s["week"] >= self.CALIB_START[1]))]
+        if past.empty:
+            return 0.0
+        diffs, weights = [], []
+        for (ss, ww), _ in past.groupby(["season", "week"]):
+            d = self._week_total_diffs(ss, ww)
+            diffs.append(d)
+            weights.append(np.full(len(d), 0.5 ** (season - ss)))
+        return _weighted_median(np.concatenate(diffs), np.concatenate(weights))
+
+    @lru_cache(maxsize=None)
+    def _week_total_diffs(self, season, week):
+        fit = self._raw_as_of(season, week)
+        wk = self.sched[(self.sched["season"] == season) & (self.sched["week"] == week)
+                        & self.sched["final"] & self.sched["close_total"].notna()]
+        return np.array([project(fit, g.home_team, g.away_team, g.neutral)["total"] - g.close_total
+                         for g in wk.itertuples()])
+
+    @lru_cache(maxsize=None)
+    def _raw_as_of(self, season, week) -> Fit:
         prior = self.end_of_season(season - 1)
         cur = self.tg[(self.tg["season"] == season) & (self.tg["week"] < week)]
         prev = self.tg[self.tg["season"] == season - 1]
@@ -164,6 +200,12 @@ class RatingsEngine:
         gp = cur.groupby("posteam").size().to_dict()
         return Fit(eff=eff, pace=pace, pts=_points_model(history), hfa_pts=_hfa_points(history, season),
                    sec_per_play=_sec_per_play(cur, prev), games_played=gp)
+
+
+def _weighted_median(x, w):
+    o = np.argsort(x)
+    cw = np.cumsum(w[o])
+    return float(x[o][np.searchsorted(cw, cw[-1] / 2)])
 
 
 def project(fit: Fit, home, away, neutral=False):
@@ -181,8 +223,8 @@ def project(fit: Fit, home, away, neutral=False):
     h_epa, h_plays, h_pts = side(h, a)
     a_epa, a_plays, a_pts = side(a, h)
     hfa_pts = fit.hfa_pts * hf
-    h_pts += hfa_pts / 2
-    a_pts -= hfa_pts / 2
+    h_pts += hfa_pts / 2 - fit.total_offset / 2
+    a_pts -= hfa_pts / 2 + fit.total_offset / 2
 
     return {
         "home_pts": h_pts, "away_pts": a_pts,
@@ -221,14 +263,15 @@ def league_terms(fit: Fit):
         "mu_epa": float(fit.eff[0]), "hfa_epa": float(fit.eff[-1]),
         "mu_plays": float(fit.pace[0]), "hfa_plays": float(fit.pace[-1]),
         "pts_a": fit.pts[0], "pts_b": fit.pts[1], "pts_c": fit.pts[2],
-        "hfa_pts": fit.hfa_pts,
+        "hfa_pts": fit.hfa_pts, "total_offset": fit.total_offset,
     }
 
 
 def fit_to_dict(fit: Fit, meta=None):
     return {
         "teams": TEAM_LIST, "eff": [float(x) for x in fit.eff], "pace": [float(x) for x in fit.pace],
-        "pts": list(fit.pts), "hfa_pts": fit.hfa_pts,
+        "pts": list(fit.pts), "hfa_pts": fit.hfa_pts, "total_offset": fit.total_offset,
+        "neutral_rule": config.NEUTRAL_RULE,
         "sec_per_play": {k: (None if np.isnan(v) else float(v)) for k, v in fit.sec_per_play.items()},
         "games_played": {k: int(v) for k, v in fit.games_played.items()},
         "params": model_params(), **(meta or {}),
@@ -237,17 +280,20 @@ def fit_to_dict(fit: Fit, meta=None):
 
 def fit_from_dict(d) -> Fit:
     assert d["teams"] == TEAM_LIST
+    # Snapshots written before v1.1 have no total_offset: they reproduce exactly as locked.
     return Fit(eff=np.array(d["eff"]), pace=np.array(d["pace"]), pts=tuple(d["pts"]), hfa_pts=d["hfa_pts"],
+               total_offset=d.get("total_offset", 0.0),
                sec_per_play={k: (np.nan if v is None else v) for k, v in d["sec_per_play"].items()},
                games_played=d["games_played"])
 
 
 def model_params():
-    keys = ["HALF_LIFE_WEEKS", "PRIOR_REGRESSION", "PRIOR_PLAYS", "LEAGUE_PRIOR_PLAYS", "PACE_PRIOR_GAMES", "GARBAGE_WP"]
+    keys = ["HALF_LIFE_WEEKS", "PRIOR_REGRESSION", "PRIOR_PLAYS", "LEAGUE_PRIOR_PLAYS", "PACE_PRIOR_GAMES", "GARBAGE_WP",
+            "TOTALS_CALIBRATION", "NEUTRAL_RULE"]
     return {k: getattr(config, k) for k in keys}
 
 
 def model_version():
     import hashlib
     h = hashlib.sha1(json.dumps(model_params(), sort_keys=True).encode()).hexdigest()[:7]
-    return f"epa-ridge-1.0+{h}"
+    return f"epa-ridge-1.1+{h}"

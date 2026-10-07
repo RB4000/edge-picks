@@ -22,7 +22,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def run(schedules, team_games, seasons=None):
     seasons = seasons or config.BACKTEST_SEASONS
-    eng = ratings.RatingsEngine(team_games)
+    schedules = data.with_neutral_rule(schedules, config.NEUTRAL_RULE)
+    team_games = data.apply_neutral(team_games, schedules)
+    eng = ratings.RatingsEngine(team_games, schedules)
     rows = []
     games = schedules[schedules["season"].isin(seasons) & schedules["final"]]
     for (season, week), wk in games.groupby(["season", "week"]):
@@ -67,6 +69,9 @@ def summarize(bt):
         "model_vs_market_corr": float(np.corrcoef(bt["model_margin"], mkt_margin)[0, 1]),
     }
     out["n_games"] = len(bt)
+    picked = bt[bt["total_pick"].isin(["OVER", "UNDER"])]
+    out["over_share"] = float((picked["total_pick"] == "OVER").mean())
+    out["model_minus_market_total_median"] = float((bt["model_total"] - bt["market_total"]).median())
     return out
 
 
@@ -95,7 +100,26 @@ def _fmt(r):
     return (r["label"], f"{r['pct']:.1%}", f"{r['units']:+.1f}u", f"{r['p_value']:.2f}")
 
 
-def write_report(summary, sens, path):
+def _before_after(before, after):
+    L = ["## Totals calibration: v1.0 → v1.1\n",
+         "v1.0 projected the *mean* total. NFL totals skew right (mean ≈ 1 pt above median) and market totals "
+         "sit near the median, so v1.0 leaned over. v1.1 subtracts a walk-forward offset: the recency-weighted "
+         "median of (model total − market total) over all games before the prediction week. Spreads are unchanged.\n",
+         "| | v1.0 | v1.1 |", "|---|---|---|",
+         f"| Over share of total picks | {before['over_share']:.1%} | {after['over_share']:.1%} |",
+         f"| Median model − market total | {before['model_minus_market_total_median']:+.2f} | "
+         f"{after['model_minus_market_total_median']:+.2f} |",
+         f"| Model total MAE | {before['accuracy']['model_total_mae']:.2f} | {after['accuracy']['model_total_mae']:.2f} |",
+         "", "| Tier | v1.0 totals | v1.0 % | v1.0 units | v1.1 totals | v1.1 % | v1.1 units |",
+         "|---|---|---|---|---|---|---|"]
+    for k in after["total"]:
+        b, a = before["total"][k], after["total"][k]
+        L.append(f"| {k} | {b['label']} | {b['pct']:.1%} | {b['units']:+.1f}u | {a['label']} | {a['pct']:.1%} | {a['units']:+.1f}u |")
+    L.append("")
+    return L
+
+
+def write_report(summary, sens, path, before=None):
     a = summary["accuracy"]
     L = []
     L.append("# Backtest results\n")
@@ -126,6 +150,8 @@ def write_report(summary, sens, path):
     L.append(f"\nCalibration slope (actual margin on model margin): {a['margin_slope']:.2f} "
              f"(1.0 = perfectly scaled; >1 means the model is too conservative). "
              f"Correlation of model margin with closing-line margin: {a['model_vs_market_corr']:.2f}.\n")
+    if before is not None:
+        L.extend(_before_after(before, summary))
     L.append("## Parameter sensitivity (not used to choose parameters)\n")
     L.append("Each row changes one parameter from the default and reruns the whole backtest. "
              "If results swing a lot between rows, any single row's record is mostly noise.\n")
@@ -166,6 +192,8 @@ def main(schedules=None, team_games=None, sensitivity=True):
     team_games = team_games if team_games is not None else data.load_team_games(schedules, refresh_current=False)
     bt = run(schedules, team_games)
     summary = summarize(bt)
+    with _override(TOTALS_CALIBRATION=False, NEUTRAL_RULE="nflverse"):
+        before = summarize(run(schedules, team_games))
     sens = []
     if sensitivity:
         sens.append(("**default**", summary))
@@ -175,9 +203,9 @@ def main(schedules=None, team_games=None, sensitivity=True):
             sens.append((", ".join(f"{k}={v:g}" for k, v in ov.items()), s))
     (ROOT / "data").mkdir(exist_ok=True)
     bt.to_csv(ROOT / "data" / "backtest_games.csv", index=False)
-    write_report(summary, sens, ROOT / "backtest_results.md")
+    write_report(summary, sens, ROOT / "backtest_results.md", before=before)
     (ROOT / "results").mkdir(exist_ok=True)
-    payload = {**summary, "by_season": {str(k): v for k, v in summary["by_season"].items()},
+    payload = {**summary, "v1_0": before, "by_season": {str(k): v for k, v in summary["by_season"].items()},
                "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                "seasons": config.BACKTEST_SEASONS}
     (ROOT / "results" / "backtest_summary.json").write_text(json.dumps(payload, indent=1))

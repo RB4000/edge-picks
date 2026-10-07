@@ -16,12 +16,14 @@
   <h2>3. Pace</h2>
   <p>The same regression structure, run on offensive plays per game, gives each team a pace rating for its offense and for what its defense allows. Projected plays × projected efficiency is what drives the total.</p>
   <h2>4. Points and home field</h2>
-  <p>Projected efficiency and plays turn into points through a fit on every game since {{ cfg.FIRST_SEASON }}. Home field is <em>estimated</em>, not assumed: it's the average home margin in non-neutral games, with recent seasons weighted more. It moves as the league changes.</p>
+  <p>Projected efficiency and plays turn into points through a fit on every game since {{ cfg.FIRST_SEASON }}. Home field is <em>estimated</em>, not assumed: it's the average home margin in non-neutral games, with recent seasons weighted more. It moves as the league changes. International and other neutral-site games get zero home field.</p>
+  <h2>4b. Totals calibration</h2>
+  <p>NFL scoring skews high. A few shootouts pull the average game about a point above the typical one. The model projects averages, while market totals sit near the typical (median) game, so an uncalibrated model leans over. Each week, projected totals are shifted by the median gap between model and market totals across every earlier game.{% if bt and bt.v1_0 %} In the backtest this moved the over share of total picks from {{ bt.v1_0.over_share|pct }} to {{ bt.over_share|pct }}.{% endif %}</p>
   <h2>5. Picks</h2>
   <p>Model spread and total are compared with the market line. The difference is the edge, and the pick is whichever side the model prefers. Edges are grouped into tiers: under 2 points, 2–3.5, and 3.5+.</p>
   <h2>6. The rules</h2>
   <ul>
-    <li>The first market line we capture for a game is frozen. Picks are graded against it, never against a later number.</li>
+    <li>Each game's line is frozen at the first capture on or after 7:00 AM CT on Tuesday of game week. Picks are graded against it, never against a later number. (Launch week, Week 5 of 2026, froze at first capture on Wednesday. Those rows are labeled on the record page.)</li>
     <li>A pick is generated and locked once, before kickoff, after every earlier game's play-by-play is in. It is never revised.</li>
     <li>The ratings used for each week are published as a file next to the picks.</li>
     <li>Closing lines are recorded after kickoff so closing line value can be measured.</li>

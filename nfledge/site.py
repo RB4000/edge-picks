@@ -50,6 +50,14 @@ def fmt_ts(iso):
     return dt.strftime("%b %-d, %-I:%M %p ") + dt.strftime("%Z").replace("EDT", "ET").replace("EST", "ET")
 
 
+def fmt_captured(iso):
+    """UTC ISO -> 'captured Wed 10/7, 8:47 AM ET'"""
+    if not isinstance(iso, str) or not iso:
+        return "—"
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(DISPLAY_TZ)
+    return dt.strftime("captured %a %-m/%-d, %-I:%M %p ET")
+
+
 def ordinal(n):
     n = int(n)
     suf = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
@@ -62,7 +70,7 @@ def pct(x):
 
 def env():
     e = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=select_autoescape(["html"]))
-    e.filters.update(line=fmt_line, num=fmt_num, signed=fmt_signed, ts=fmt_ts, ordinal=ordinal, pct=pct)
+    e.filters.update(captured=fmt_captured, line=fmt_line, num=fmt_num, signed=fmt_signed, ts=fmt_ts, ordinal=ordinal, pct=pct)
     e.globals.update(cfg=config, now=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), tiers=[t[0] for t in config.TIERS],
                      logo=logo_url, full_name=full_name, short_name=short_name)
     return e
@@ -104,6 +112,7 @@ def game_views(sched, graded, season, week, now):
             "kickoff_iso": g.kickoff_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "day_key": ko.strftime("%Y-%m-%d"), "day_label": ko.strftime("%A, %B %-d"),
             "time_label": ko.strftime("%-I:%M %p ET"), "neutral": bool(g.neutral),
+            "neutral_nflverse": bool(g.neutral_nflverse), "international": bool(g.international),
             "stadium": g.get("stadium"), "final": bool(g.final),
             "away_score": None if pd.isna(g.away_score) else int(g.away_score),
             "home_score": None if pd.isna(g.home_score) else int(g.home_score),
@@ -128,12 +137,14 @@ def game_views(sched, graded, season, week, now):
     return games, days
 
 
-def explain(fit, g):
-    """Plain-language rating components for a game page."""
+def explain(fit, g, snap):
+    """Plain-language rating components for a game page, reproduced exactly as the model saw it at lock time."""
     tab = ratings.ratings_table(fit)
     lt = ratings.league_terms(fit)
-    pr = ratings.project(fit, g["home"], g["away"], g["neutral"])
-    out = {"proj": pr, "league": lt, "teams": {}}
+    # Snapshots from before v1.1 used nflverse's location field for neutral sites.
+    neutral_used = g["neutral"] if "neutral_rule" in snap else g["neutral_nflverse"]
+    pr = ratings.project(fit, g["home"], g["away"], neutral_used)
+    out = {"proj": pr, "league": lt, "teams": {}, "neutral_used": neutral_used}
     for side in ("away", "home"):
         t = g[side]
         r = tab.loc[t]
@@ -158,11 +169,15 @@ def explain(fit, g):
         + (f"In neutral situations the {A} snap the ball every {a['spp']:.1f}s ({ordinal(a['spp_rank'])} fastest) and "
            f"the {H} every {h['spp']:.1f}s ({ordinal(h['spp_rank'])})." if a["spp_rank"] and h["spp_rank"] else ""),
         (f"Home field is worth {lt['hfa_pts']:.1f} points to the {H}, estimated from actual home margins since "
-         f"{config.FIRST_SEASON} (recent seasons weighted more)." if not g["neutral"]
+         f"{config.FIRST_SEASON} (recent seasons weighted more)." if not neutral_used
          else "Neutral site: no home-field adjustment."),
         f"Efficiency × plays becomes points via a fit on every game since {config.FIRST_SEASON}: "
         f"points ≈ {lt['pts_a']:.1f} + {lt['pts_b']:.2f}×plays + {lt['pts_c']:.2f}×(plays × EPA/play).",
     ]
+    if lt["total_offset"]:
+        lines.append(f"Totals calibration: the projected total is lowered by {lt['total_offset']:.1f} points. NFL "
+                     f"scoring skews high, so a mean projection runs above the typical (median) game the market prices. "
+                     f"The offset is the median gap between model and market totals across all earlier games.")
     out["sentences"] = lines
     out["net_word"] = {side: off_word(out["teams"][side]["net_rank"]) for side in ("away", "home")}
     return out
@@ -216,15 +231,25 @@ def build(sched, graded, week):
             (tmp / "index.html").write_text(e.get_template("week.html").render(**ctx, root="", page="index"))
         fit = ratings.fit_from_dict(snap) if snap else None
         for g in games:
-            ex = explain(fit, g) if fit else None
+            ex = explain(fit, g, snap) if fit else None
             (tmp / "game" / f"{g['id']}.html").write_text(
                 e.get_template("game.html").render(g=g, ex=ex, snap=snap, season=season, week=w, root="../", page="game"))
 
     # record page
     rec = summary_records(graded, season)
     rows = graded[graded["season"] == season].sort_values(["week", "kickoff_utc"], ascending=[False, True]) if len(graded) else graded
+    rows = rows.to_dict("records")
+    early = {}
+    for r in rows:
+        r["pre_policy"] = (int(r["season"]), int(r["week"])) < config.FREEZE_POLICY_FROM
+        if r["pre_policy"]:
+            early.setdefault(int(r["week"]), set()).add(fmt_captured(r["line_fetched_at"]).split(",")[0].replace("captured ", ""))
+    pre_notes = [f"Week {w} lines were captured {', '.join(sorted(days))}, the day the site launched. By then the "
+                 f"market had already moved off its Tuesday numbers, so these are not opening or Tuesday-morning lines."
+                 for w, days in sorted(early.items())]
     (tmp / "record.html").write_text(e.get_template("record.html").render(
-        rec=rec, rows=rows.to_dict("records"), season=season, root="", page="record"))
+        rec=rec, rows=rows, season=season, root="", page="record", pre_notes=pre_notes,
+        policy=config.FREEZE_POLICY_FROM))
 
     # method page with backtest
     bt_path = ROOT / "results" / "backtest_summary.json"

@@ -14,13 +14,15 @@ An opponent-adjusted EPA model that projects every NFL game's score, compares it
 
 **3. Pace drives totals.** The same regression on offensive plays per game rates each team's pace and the pace its defense allows. We also track seconds per snap in neutral game states. Projected plays × projected EPA/play → projected points.
 
-**4. Home field is measured, not assumed.** It's the recency-weighted average home margin in non-neutral games since 2021 (currently about +2 points), and it updates as the league changes.
+**4. Home field is measured, not assumed.** It's the recency-weighted average home margin in non-neutral games since 2021 (currently about +2 points), and it updates as the league changes. International and other neutral-site games get zero home field, including "home" games in London, which nflverse sometimes labels as true home games.
 
-**5. Model line vs. market line.** Projected scores give a model spread and total. The difference from the market line is the **edge**, and the pick is whichever side the model prefers. Edges are tiered: **under 2**, **2–3.5**, and **3.5+** points.
+**5. Totals are calibrated to how the market prices them.** NFL scoring skews high: a few shootouts pull the *average* game about a point above the *typical* (median) game. The model projects averages, while market totals sit near the median, so an uncalibrated model leans over. Each week's projected totals are shifted by the median gap between model and market totals across every earlier game. The model still says which games should be higher- or lower-scoring than the market expects. It no longer makes a blanket call on the whole league's scoring.
+
+**6. Model line vs. market line.** Projected scores give a model spread and total. The difference from the market line is the **edge**, and the pick is whichever side the model prefers. Edges are tiered: **under 2**, **2–3.5**, and **3.5+** points.
 
 ### The rules (transparency is the product)
 
-- The **first** market line captured for a game is frozen. Picks are graded against it, never against a later number.
+- Each game's line is **frozen at the first capture on or after 7:00 AM CT Tuesday** of game week. Picks are graded against it, never against a later number. (Week 5 of 2026, launch week, was frozen at first capture on Wed 10/7. The record page labels those rows.)
 - A pick is generated and locked **once**, before kickoff, after every earlier game's play-by-play is in. It is never revised.
 - The exact ratings used each week are published (`ledger/ratings/2026_w05.json`).
 - Closing lines are recorded after kickoff so **closing line value** (CLV) can be measured.
@@ -34,7 +36,7 @@ Injuries, QB changes, weather, travel, motivation — except as they've already 
 
 Before each week, ratings were refit using only earlier games. Picks were graded against **closing** lines at −110 (break-even 52.4%). Parameters were set before the backtest and **not tuned to it**. Full report with confidence intervals and a parameter-sensitivity table: [`backtest_results.md`](backtest_results.md).
 
-Headline: **ATS 547-563-29 (49.3%), totals 542-587-10 (48.0%)** — no demonstrated edge against closing lines. The 3.5+ tiers ran 51.9% ATS and 53.4% on totals, both within noise (p = 0.58 and 0.37). This is published as-is. CLV on the live record page is the faster test of whether the model's early-week numbers beat where the market settles.
+Headline (v1.1): **ATS 547-563-29 (49.3%), totals 554-575-10 (49.1%)**, so no demonstrated edge against closing lines. The 3.5+ tiers ran 51.9% ATS and 52.4% on totals, both within noise. The totals calibration moved the over/under split of picks from 61/39 to 50/50 and totals from 48.0% to 49.1% (before/after table in the report). These results are published as is. CLV on the live record page is the faster test of whether the model's early-week numbers beat where the market settles.
 
 ---
 
@@ -54,7 +56,7 @@ make deploy     # Cloudflare Pages (asks for a project name the first time)
 
 ### When picks lock
 
-The "current week" is the earliest week with an unfinished game. Lines are captured on every run for that week's games. Picks lock on the first run where (a) a line exists and (b) every earlier game is final **and** in nflverse play-by-play. With a daily 7am run, that's usually Tuesday, or Wednesday if the Monday-night play-by-play is late. Either way it's before Thursday kickoff.
+The "current week" is the earliest week with an unfinished game. Each run snapshots lines for that week, plus next week once its freeze window is open. A game's line freezes at the first capture on or after 7:00 AM CT on the Tuesday before the week's first kickoff (`FREEZE_*` in `config.py`). Earlier captures are logged in `line_snapshots.csv` but never frozen. Picks lock on the first run where (a) the line is frozen and (b) every earlier game is final **and** in nflverse play-by-play. With the daily 7am run, lines freeze Tuesday at 7am and picks usually lock at the same time, or Wednesday if the Monday-night play-by-play is late. Either way it's before Thursday kickoff.
 
 ### Market lines
 

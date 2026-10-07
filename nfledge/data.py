@@ -28,7 +28,14 @@ def load_schedules(refresh=True):
         df = nfl.load_schedules(seasons).to_pandas()
         df.to_parquet(path)
     df = pd.read_parquet(path)
-    df["neutral"] = df["location"].eq("Neutral")
+    df["neutral_nflverse"] = df["location"].eq("Neutral")
+    intl = df["stadium_id"].isin(config.INTERNATIONAL_STADIUM_IDS) | df["stadium"].fillna("").str.contains(
+        "|".join(config.INTERNATIONAL_VENUE_WORDS), case=False)
+    df["international"] = intl
+    df["neutral_venue"] = df["neutral_nflverse"] | intl
+    for gid, flag in config.NEUTRAL_OVERRIDES.items():
+        df.loc[df["game_id"] == gid, "neutral_venue"] = flag
+    df["neutral"] = df["neutral_venue"] if config.NEUTRAL_RULE == "venue" else df["neutral_nflverse"]
     # Betting convention: home_spread -3.5 means home favored by 3.5. nflverse spread_line is the reverse.
     df["close_home_spread"] = -df["spread_line"]
     df["close_total"] = df["total_line"]
@@ -82,9 +89,23 @@ def load_team_games(schedules, refresh_current=True):
         frames.append(pd.read_parquet(path))
     tg = pd.concat(frames, ignore_index=True)
 
-    sched = schedules[["game_id", "home_team", "away_team", "home_score", "away_score", "neutral", "gameday"]]
+    sched = schedules[["game_id", "home_team", "away_team", "home_score", "away_score", "gameday"]]
     tg = tg.merge(sched, on="game_id", how="inner")
     tg["points"] = np.where(tg["is_home"] == 1, tg["home_score"], tg["away_score"])
-    tg["home_field"] = np.where(tg["neutral"], 0, np.where(tg["is_home"] == 1, 1, -1))
+    tg = apply_neutral(tg, schedules)
     tg["epa_per_play"] = tg["epa_sum"] / tg["epa_plays"].clip(lower=1)
     return tg.drop(columns=["home_score", "away_score"])
+
+
+def apply_neutral(team_games, schedules):
+    """(Re)derive the home_field term from the schedule's current `neutral` column."""
+    tg = team_games.drop(columns=["neutral", "home_field"], errors="ignore")
+    tg = tg.merge(schedules[["game_id", "neutral"]], on="game_id", how="left")
+    tg["home_field"] = np.where(tg["neutral"], 0, np.where(tg["is_home"] == 1, 1, -1))
+    return tg
+
+
+def with_neutral_rule(schedules, rule):
+    s = schedules.copy()
+    s["neutral"] = s["neutral_venue"] if rule == "venue" else s["neutral_nflverse"]
+    return s
