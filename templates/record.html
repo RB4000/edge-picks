@@ -8,6 +8,10 @@
   <p class="lede">The official record grades every pick against the line we froze, never a later one. The <em>vs closing line</em> record grades the same picks at the closing number: would they still have won if you had bet at kickoff? Closing line value (CLV) is how far the market moved toward the pick after it was published.</p>
 </section>
 
+{% if sp.preview %}
+<section class="panel"><p class="note">{{ sp.preview_label }}. No {{ sp.label }} picks have been counted yet, so there is no record to show. Frozen lines are still being published as they are captured: <a href="{{ root }}{{ sp.ledger_prefix }}frozen_lines.csv">frozen_lines.csv</a>.</p></section>
+{% else %}
+{% if sp.coverage_note %}<p class="notice">{{ sp.coverage_note }}</p>{% endif %}
 {{ record_tiles(rec) }}
 
 <section class="panel">
@@ -56,4 +60,5 @@
   </table>
   </div>
 </section>
+{% endif %}
 {% endblock %}

@@ -104,6 +104,9 @@ class SportView:
         self.article = "the " if sport.key == "nfl" else ""
         self.ledger_prefix = sport.ledger.public_prefix
         self.freeze_week = sport.freeze_policy_from[1]
+        self.preview = sport.ledger.preview
+        self.preview_label = config.NCAAF_PREVIEW_LABEL if self.preview else ""
+        self.coverage_note = config.NCAAF_COVERAGE_NOTE if sport.key == "ncaaf" else ""
 
     def name(self, t):
         return self.s.name(t)
@@ -307,14 +310,16 @@ def build_sport(e, tmp, res, now):
             (base / "game" / f"{g['id']}.html").write_text(e.get_template("game.html").render(
                 sp=sv, g=g, ex=ex, snap=snap, season=season, week=w, root="../../", sroot="../", page="game"))
 
-    rows = graded[graded["season"] == season].sort_values(["week", "kickoff_utc"], ascending=[False, True]) \
-        if len(graded) else graded
+    # preview picks are shown on week/game pages but are not part of any record
+    counted = _empty_graded() if sv.preview else graded
+    rows = counted[counted["season"] == season].sort_values(["week", "kickoff_utc"], ascending=[False, True]) \
+        if len(counted) else counted
     rows = rows.to_dict("records")
     notes = pre_policy_notes(rows, sport)
-    rec = records(graded, season)
+    rec = records(counted, season)
     (base / "record.html").write_text(e.get_template("record.html").render(
         sp=sv, rec=rec, rows=rows, season=season, root="../", sroot="", page="record", pre_notes=notes))
-    return {"sv": sv, "week": week, "current": current, "rec": rec, "graded": graded}
+    return {"sv": sv, "week": week, "current": current, "rec": rec, "graded": counted}
 
 
 def build_all(results):
@@ -357,7 +362,7 @@ def build_all(results):
         dest.mkdir(parents=True, exist_ok=True)
         for f in led.public_files():
             shutil.copy(f, dest / f.name)
-        if led.ratings_dir.exists():
+        if led.ratings_dir.exists() and not led.preview:
             shutil.copytree(led.ratings_dir, dest / "ratings")
     (tmp / "ledger").mkdir(exist_ok=True)
     if (ROOT / "backtest_results.md").exists():

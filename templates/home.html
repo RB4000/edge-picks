@@ -8,7 +8,7 @@
   <p class="lede">{{ cfg.BRAND_TAGLINE }}</p>
 </section>
 
-<h2 class="day-label">Overall record, all sports</h2>
+<h2 class="day-label">Overall record, {{ 'all sports' if not cfg.NCAAF_PREVIEW else 'NFL (NCAAF in preview)' }}</h2>
 {{ record_tiles(overall) }}
 
 <div class="hub">
@@ -16,9 +16,10 @@
 {% set sp = c.sv %}
 <section class="panel hub-card">
   <div class="hub-head">
-    <h2>{{ sp.label }} · Week {{ c.week }}</h2>
+    <h2>{{ sp.label }} · Week {{ c.week }}{% if sp.preview %} <span class="tag-preview">preview</span>{% endif %}</h2>
     <a class="card-link" href="{{ sp.key }}/index.html">Full card <span aria-hidden="true">→</span></a>
   </div>
+  {% if sp.preview %}<p class="fine"><strong>{{ sp.preview_label }}.</strong> Not included in the overall record.</p>{% endif %}
   <p class="fine">{{ c.n_locked }} of {{ c.n_games }} games locked{% if sp.key == 'ncaaf' %} (FBS vs FBS with a market line){% endif %} · season: ATS {{ c.rec.spread.tiers.All.frozen.label or '0-0' }}, totals {{ c.rec.total.tiers.All.frozen.label or '0-0' }} · <a href="{{ sp.key }}/record.html">record</a></p>
   {% if c.top %}
   <table class="data hub-table">

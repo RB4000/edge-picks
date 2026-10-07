@@ -100,7 +100,7 @@ class NCAAF(Sport):
     key, label = "ncaaf", "NCAAF"
     season = config.NCAAF_CURRENT_SEASON
     freeze_policy_from = config.NCAAF_FREEZE_POLICY_FROM
-    ledger = ledger.NCAAF
+    ledger = ledger.NCAAF_PREVIEW if config.NCAAF_PREVIEW else ledger.NCAAF
 
     def params(self):
         return ratings.ncaaf_params()
@@ -113,6 +113,8 @@ class NCAAF(Sport):
     def load(self, refresh=True):
         from nfledge import cfb_data
         s = cfb_data.load_schedules(refresh=refresh)
+        start = pd.Timestamp(config.NCAAF_COVERAGE_START_ET, tz=ET).tz_convert("UTC")
+        s.loc[(s["season"] == self.season) & (s["kickoff_utc"] < start), "pickable"] = False
         tg = cfb_data.load_team_games(s, refresh=refresh)
         return s, tg, cfb_data.groups_by_season(s)
 

@@ -30,7 +30,7 @@
 {% if p %}
 {% set has_close = p.close_home_spread == p.close_home_spread and p.close_home_spread is not none %}
 <section class="panel">
-  <h2>The pick</h2>
+  <h2>The pick{% if sp.preview %} <span class="tag-preview">preview · not counted</span>{% endif %}</h2>
   <div class="pickpair">
     <div class="pickbox">
       <div class="pb-label">Spread</div>
@@ -55,13 +55,13 @@
     <div><dt>Line graded on</dt><dd>{{ H }} <span class="num">{{ p.line_home_spread|line }}</span>, total <span class="num">{{ p.line_total|num }}</span></dd></div>
     <div><dt>Line source</dt><dd>{{ p.line_source }}</dd></div>
     <div><dt>Line frozen</dt><dd>{{ p.line_fetched_at|captured }}{% if (season, week) < sp.s.freeze_policy_from %} · launch-week capture, before the Tuesday 7am CT freeze rule{% endif %}</dd></div>
-    <div><dt>Pick locked</dt><dd>{{ p.locked_at|ts }}</dd></div>
+    <div><dt>{{ 'Preview generated' if sp.preview else 'Pick locked' }}</dt><dd>{{ p.locked_at|ts }}</dd></div>
     <div><dt>Kickoff</dt><dd>{{ p.kickoff_utc|ts }}</dd></div>
     {% if has_close %}
     <div><dt>Closing line</dt><dd>{{ H }} <span class="num">{{ p.close_home_spread|line }}</span>, total <span class="num">{{ p.close_total|num }}</span> · {{ p.close_source }}</dd></div>
     <div><dt>Closing line value</dt><dd>spread <span class="num">{{ p.spread_clv|signed }}</span> · total <span class="num">{{ p.total_clv|signed }}</span></dd></div>
     {% endif %}
-    <div><dt>Model</dt><dd class="num">{{ p.model_version }} · <a href="{{ root }}{{ sp.ledger_prefix }}ratings/{{ p.ratings_file }}">ratings file</a></dd></div>
+    <div><dt>Model</dt><dd class="num">{{ p.model_version }}{% if not sp.preview %} · <a href="{{ root }}{{ sp.ledger_prefix }}ratings/{{ p.ratings_file }}">ratings file</a>{% endif %}</dd></div>
   </dl>
 </section>
 {% endif %}

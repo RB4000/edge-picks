@@ -78,6 +78,14 @@ NCAAF_MODEL = {
 }
 NCAAF_ODDS_API_SPORT = "americanfootball_ncaaf"
 NCAAF_FREEZE_POLICY_FROM = (2026, 7)   # week 6 (launch week) froze at first capture on 10/7
+# Preview: picks are computed and shown, labelled, but written to data/preview (never the public ledger).
+NCAAF_PREVIEW = True
+NCAAF_PREVIEW_LABEL = "PREVIEW — model calibration in progress, picks not yet counted"
+# Games kicking off before this date (ET) are never picked or graded: the public NCAAF record
+# starts with Saturday 10/10/2026. Week 6's Wed/Thu/Fri games are excluded entirely.
+NCAAF_COVERAGE_START_ET = "2026-10-10"
+NCAAF_COVERAGE_NOTE = ("NCAAF coverage starts with Saturday, October 10, 2026 (Week 6). Week 6's Wednesday–Friday "
+                       "games were not picked or graded.")
 # Odds API team name -> CFBD school, for names that don't match "School Mascot" after normalising.
 NCAAF_NAME_ALIASES = {
     "Hawaii Rainbow Warriors": "Hawai'i",

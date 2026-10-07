@@ -21,7 +21,7 @@
 <article class="card status-{{ g.status }}">
   <header class="card-head">
     <span class="kick">{{ g.time_label }}{% if g.neutral %} · {{ 'international · ' if g.international else '' }}neutral site{% endif %}</span>
-    {% if g.status == 'locked' %}<span class="lock" title="Pick locked {{ p.locked_at|ts }} against the line {{ p.line_fetched_at|captured }}">Locked {{ p.locked_at|ts }}</span>{% endif %}
+    {% if g.status == 'locked' %}{% if sp.preview %}<span class="lock">Preview · not counted</span>{% else %}<span class="lock" title="Pick locked {{ p.locked_at|ts }} against the line {{ p.line_fetched_at|captured }}">Locked {{ p.locked_at|ts }}</span>{% endif %}{% endif %}
   </header>
   <div class="matchup">
     {% if p %}

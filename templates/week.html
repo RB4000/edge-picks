@@ -4,7 +4,7 @@
 {% block content %}
 <section class="intro">
   <p class="eyebrow">{{ sp.label }} · {{ season }} season{% if sp.key == "ncaaf" %} · FBS vs FBS games with a market line{% endif %}</p>
-  <h1>Week {{ week }}</h1>
+  <h1>Week {{ week }}{% if sp.preview %} <span class="tag-preview">preview</span>{% endif %}</h1>
   <p class="lede">{{ cfg.BRAND_TAGLINE }}</p>
   {% if snap %}<p class="fine">Ratings fit {{ snap.fit_at|ts }} on data through {{ snap.data_through }} · model {{ snap.model_version }}</p>{% endif %}
   <nav class="weeknav" aria-label="Weeks">

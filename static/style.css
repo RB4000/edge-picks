@@ -203,3 +203,6 @@ table.data { border-collapse: collapse; width: 100%; font-size: 13px; margin: 6p
 .hub-table td.pick { color: var(--accent); }
 .rk-1 { color: var(--text); }
 .rk-2 { color: var(--muted); }
+
+.preview-banner { border-left-color: #d9a441; margin-bottom: 8px; }
+.tag-preview { display: inline-block; vertical-align: middle; margin-left: 8px; padding: 2px 8px; border: 1px solid #d9a441; border-radius: 999px; color: #d9a441; font: 500 11px/1.4 "IBM Plex Mono", monospace; letter-spacing: .04em; text-transform: uppercase; }
