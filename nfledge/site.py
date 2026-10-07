@@ -1,4 +1,14 @@
-"""Static site generator: ./site is rebuilt from scratch from the ledger + nflverse results."""
+"""Static site generator: ./site is rebuilt from scratch from the ledgers + results on every run.
+
+Layout:
+  index.html                      hub: overall record strip + this week's strongest picks per sport
+  {nfl,ncaaf}/index.html          current week
+  {nfl,ncaaf}/week/S-WW.html      week archive
+  {nfl,ncaaf}/game/<id>.html      per-game breakdown
+  {nfl,ncaaf}/record.html         season record (vs frozen line and vs closing line)
+  method.html                     methodology + backtests
+  ledger/...                      raw public ledgers (NFL at ledger/, NCAAF at ledger/ncaaf/)
+"""
 import json
 import shutil
 from datetime import datetime, timezone
@@ -10,8 +20,8 @@ import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 import config
-from nfledge import ledger, picks, ratings
-from nfledge.teams import full_name, logo_url, short_name
+from nfledge import ledger as ledger_mod
+from nfledge import picks, ratings
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "site"
@@ -20,8 +30,12 @@ DISPLAY_TZ = ZoneInfo(config.TIMEZONE_DISPLAY)
 
 # --- formatting ---------------------------------------------------------------
 
+def _missing(x):
+    return x is None or (isinstance(x, float) and np.isnan(x)) or x is pd.NA
+
+
 def fmt_line(x, pk=True):
-    if x is None or (isinstance(x, float) and np.isnan(x)):
+    if _missing(x):
         return "—"
     x = float(x)
     if x == 0 and pk:
@@ -31,15 +45,11 @@ def fmt_line(x, pk=True):
 
 
 def fmt_num(x, d=1):
-    if x is None or (isinstance(x, float) and np.isnan(x)):
-        return "—"
-    return f"{float(x):.{d}f}"
+    return "—" if _missing(x) else f"{float(x):.{d}f}"
 
 
 def fmt_signed(x, d=1):
-    if x is None or (isinstance(x, float) and np.isnan(x)):
-        return "—"
-    return f"{float(x):+.{d}f}".replace("-", "−")
+    return "—" if _missing(x) else f"{float(x):+.{d}f}".replace("-", "−")
 
 
 def fmt_ts(iso):
@@ -47,7 +57,7 @@ def fmt_ts(iso):
     if not isinstance(iso, str) or not iso:
         return "—"
     dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(DISPLAY_TZ)
-    return dt.strftime("%b %-d, %-I:%M %p ") + dt.strftime("%Z").replace("EDT", "ET").replace("EST", "ET")
+    return dt.strftime("%b %-d, %-I:%M %p ET")
 
 
 def fmt_captured(iso):
@@ -59,38 +69,71 @@ def fmt_captured(iso):
 
 
 def ordinal(n):
+    if _missing(n):
+        return "—"
     n = int(n)
     suf = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
     return f"{n}{suf}"
 
 
 def pct(x):
-    return "—" if x is None else f"{x * 100:.1f}%"
+    return "—" if _missing(x) else f"{x * 100:.1f}%"
+
+
+def units(x):
+    return "—" if _missing(x) else f"{x:+.1f}"
 
 
 def env():
     e = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=select_autoescape(["html"]))
-    e.filters.update(captured=fmt_captured, line=fmt_line, num=fmt_num, signed=fmt_signed, ts=fmt_ts, ordinal=ordinal, pct=pct)
-    e.globals.update(cfg=config, now=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), tiers=[t[0] for t in config.TIERS],
-                     logo=logo_url, full_name=full_name, short_name=short_name)
+    e.filters.update(captured=fmt_captured, line=fmt_line, num=fmt_num, signed=fmt_signed, ts=fmt_ts,
+                     ordinal=ordinal, pct=pct, units=units)
+    e.globals.update(cfg=config, now=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                     tiers=[t[0] for t in config.TIERS])
     return e
 
 
 # --- view models --------------------------------------------------------------
 
+class SportView:
+    """What templates need to know about a sport."""
+
+    def __init__(self, sport):
+        self.s = sport
+        self.key, self.label = sport.key, sport.label
+        self.article = "the " if sport.key == "nfl" else ""
+        self.ledger_prefix = sport.ledger.public_prefix
+        self.freeze_week = sport.freeze_policy_from[1]
+
+    def name(self, t):
+        return self.s.name(t)
+
+    def short(self, t):
+        return self.s.short(t)
+
+    def abbr(self, t):
+        return self.s.abbr(t)
+
+    def logo(self, t):
+        return self.s.logo(t)
+
+
 def team_records(sched, season):
-    """Record entering each week: {(team, week): 'W-L(-T)'}"""
+    """Record entering a week, any opponent: rec(team, week) -> 'W-L(-T)'."""
     fin = sched[(sched["season"] == season) & sched["final"] & (sched["game_type"] == "REG")]
-    rows = []
-    for _, g in fin.iterrows():
-        m = g.home_score - g.away_score
-        rows.append((g.home_team, g.week, "W" if m > 0 else "L" if m < 0 else "T"))
-        rows.append((g.away_team, g.week, "W" if m < 0 else "L" if m > 0 else "T"))
-    df = pd.DataFrame(rows, columns=["team", "week", "r"])
+    m = fin["home_score"] - fin["away_score"]
+    df = pd.concat([
+        pd.DataFrame({"team": fin["home_team"], "week": fin["week"], "r": np.sign(m)}),
+        pd.DataFrame({"team": fin["away_team"], "week": fin["week"], "r": -np.sign(m)}),
+    ])
+    grouped = {t: d for t, d in df.groupby("team")}
 
     def rec(team, week):
-        d = df[(df["team"] == team) & (df["week"] < week)]["r"]
-        w, l, t = (d == "W").sum(), (d == "L").sum(), (d == "T").sum()
+        d = grouped.get(team)
+        if d is None:
+            return "0-0"
+        r = d.loc[d["week"] < week, "r"]
+        w, l, t = int((r > 0).sum()), int((r < 0).sum()), int((r == 0).sum())
         return f"{w}-{l}" + (f"-{t}" if t else "")
     return rec
 
@@ -99,9 +142,12 @@ def tier_slug(t):
     return {"<2": "t1", "2-3.5": "t2", "3.5+": "t3"}.get(t, "t0")
 
 
-def game_views(sched, graded, season, week, now):
+def game_views(sched, graded, season, week, now, pickable_only=True):
     rec = team_records(sched, season)
-    wk = sched[(sched["season"] == season) & (sched["week"] == week)].sort_values(["kickoff_utc", "game_id"])
+    wk = sched[(sched["season"] == season) & (sched["week"] == week)]
+    if pickable_only:
+        wk = wk[wk["pickable"]]
+    wk = wk.sort_values(["kickoff_utc", "game_id"])
     gi = graded.set_index("game_id") if len(graded) else pd.DataFrame()
     games = []
     for _, g in wk.iterrows():
@@ -137,136 +183,190 @@ def game_views(sched, graded, season, week, now):
     return games, days
 
 
-def explain(fit, g, snap):
-    """Plain-language rating components for a game page, reproduced exactly as the model saw it at lock time."""
-    tab = ratings.ratings_table(fit)
+def explain(fit, g, snap, sv, rank_pool):
+    """Plain-language rating components, reproduced exactly as the model saw them at lock time."""
+    tab = ratings.ratings_table(fit, rank_pool)
+    pool = tab.attrs["pool_size"]
     lt = ratings.league_terms(fit)
     # Snapshots from before v1.1 used nflverse's location field for neutral sites.
     neutral_used = g["neutral"] if "neutral_rule" in snap else g["neutral_nflverse"]
     pr = ratings.project(fit, g["home"], g["away"], neutral_used)
-    out = {"proj": pr, "league": lt, "teams": {}, "neutral_used": neutral_used}
+    out = {"proj": pr, "league": lt, "teams": {}, "neutral_used": neutral_used, "pool": pool}
     for side in ("away", "home"):
         t = g[side]
         r = tab.loc[t]
-        out["teams"][side] = {
-            "abbr": t, "off_epa": r.off_epa, "def_epa": r.def_epa, "off_rank": r.off_rank, "def_rank": r.def_rank,
-            "net_rank": r.net_rank, "pace_off": r.pace_off, "pace_rank": r.pace_rank,
-            "spp": r.sec_per_play, "spp_rank": None if pd.isna(r.spp_rank) else int(r.spp_rank),
-            "games": int(r.games),
-        }
+        d = {"abbr": t, "off_epa": r.off_epa, "def_epa": r.def_epa, "pace_off": r.pace_off,
+             "spp": r.sec_per_play, "games": int(r.games)}
+        for k in ("off_rank", "def_rank", "net_rank", "pace_rank", "spp_rank"):
+            d[k] = None if pd.isna(r[k]) else int(r[k])
+            d[k + "_q"] = None if d[k] is None else min(3, (d[k] - 1) * 4 // max(pool, 1))
+        out["teams"][side] = d
     a, h = out["teams"]["away"], out["teams"]["home"]
-    A, H = short_name(g["away"]), short_name(g["home"])
-    off_word = lambda rk: "elite" if rk <= 5 else "above-average" if rk <= 12 else "middling" if rk <= 20 else "below-average" if rk <= 27 else "one of the league's worst"
+    A, H = sv.article + sv.short(g["away"]), sv.article + sv.short(g["home"])
+    A0, H0 = A[0].upper() + A[1:], H[0].upper() + H[1:]
+    first = config.FIRST_SEASON if sv.key == "nfl" else config.NCAAF_FIRST_SEASON
     lines = [
-        f"The {A} offense ranks {ordinal(a['off_rank'])} in opponent-adjusted EPA/play ({fmt_signed(a['off_epa'], 3)}), "
-        f"facing a {H} defense that ranks {ordinal(h['def_rank'])} ({fmt_signed(h['def_epa'], 3)} EPA/play allowed vs. average). "
-        f"Net, the model expects {fmt_signed(pr['away_epa'], 3)} EPA per {A} snap.",
-        f"The {H} offense ranks {ordinal(h['off_rank'])} ({fmt_signed(h['off_epa'], 3)}), "
-        f"against a {A} defense ranked {ordinal(a['def_rank'])} ({fmt_signed(a['def_epa'], 3)}). "
-        f"Expected: {fmt_signed(pr['home_epa'], 3)} EPA per {H} snap.",
-        f"Pace: the model projects {pr['away_plays']:.0f} offensive plays for the {A} and {pr['home_plays']:.0f} for the {H} "
+        f"{A0} offense ranks {ordinal(a['off_rank'])} of {pool} in opponent-adjusted EPA/play "
+        f"({fmt_signed(a['off_epa'], 3)}), facing {H} defense, which ranks {ordinal(h['def_rank'])} "
+        f"({fmt_signed(h['def_epa'], 3)} EPA/play allowed vs. average). "
+        f"Net, the model expects {fmt_signed(pr['away_epa'], 3)} EPA per {sv.short(g['away'])} snap.",
+        f"{H0} offense ranks {ordinal(h['off_rank'])} ({fmt_signed(h['off_epa'], 3)}), "
+        f"against {A} defense ranked {ordinal(a['def_rank'])} ({fmt_signed(a['def_epa'], 3)}). "
+        f"Expected: {fmt_signed(pr['home_epa'], 3)} EPA per {sv.short(g['home'])} snap.",
+        f"Pace: the model projects {pr['away_plays']:.0f} offensive plays for {A} and {pr['home_plays']:.0f} for {H} "
         f"({pr['away_plays'] + pr['home_plays']:.0f} combined; league average is about {2 * lt['mu_plays']:.0f}). "
-        + (f"In neutral situations the {A} snap the ball every {a['spp']:.1f}s ({ordinal(a['spp_rank'])} fastest) and "
-           f"the {H} every {h['spp']:.1f}s ({ordinal(h['spp_rank'])})." if a["spp_rank"] and h["spp_rank"] else ""),
-        (f"Home field is worth {lt['hfa_pts']:.1f} points to the {H}, estimated from actual home margins since "
-         f"{config.FIRST_SEASON} (recent seasons weighted more)." if not neutral_used
-         else "Neutral site: no home-field adjustment."),
-        f"Efficiency × plays becomes points via a fit on every game since {config.FIRST_SEASON}: "
+        + (f"In neutral situations {A} snap the ball every {a['spp']:.1f}s ({ordinal(a['spp_rank'])} fastest) and "
+           f"{H} every {h['spp']:.1f}s ({ordinal(h['spp_rank'])})." if a["spp_rank"] and h["spp_rank"] else ""),
+        (f"Home field is worth {lt['hfa_pts']:.1f} points to {H}. This is the only place home field enters "
+         f"the projection; it is estimated from game results since {first}."
+         if not neutral_used else "Neutral site: no home-field advantage applied."),
+        f"Efficiency × plays becomes points via a fit on every game since {first}: "
         f"points ≈ {lt['pts_a']:.1f} + {lt['pts_b']:.2f}×plays + {lt['pts_c']:.2f}×(plays × EPA/play).",
     ]
     if lt["total_offset"]:
-        lines.append(f"Totals calibration: the projected total is lowered by {lt['total_offset']:.1f} points. NFL "
-                     f"scoring skews high, so a mean projection runs above the typical (median) game the market prices. "
+        lines.append(f"Totals calibration: the projected total is lowered by {lt['total_offset']:.1f} points. Scoring "
+                     f"skews high, so a mean projection runs above the typical (median) game the market prices. "
                      f"The offset is the median gap between model and market totals across all earlier games.")
     out["sentences"] = lines
-    out["net_word"] = {side: off_word(out["teams"][side]["net_rank"]) for side in ("away", "home")}
     return out
 
 
-def summary_records(graded, season):
-    g = graded[(graded["season"] == season)] if len(graded) else graded
+def records(graded, season=None):
+    """Records by market and tier, graded vs the frozen line and vs the closing line, plus CLV."""
+    g = graded if season is None or not len(graded) else graded[graded["season"] == season]
     out = {}
     for mkt in ("spread", "total"):
-        col = f"{mkt}_result"
-        res = {"All": picks.record(g[col]) if len(g) else picks.record([])}
-        for name, *_ in config.TIERS:
-            res[name] = picks.record(g.loc[g[f"{mkt}_tier"] == name, col]) if len(g) else picks.record([])
+        tiers = {}
+        for name in ["All"] + [t[0] for t in config.TIERS]:
+            sub = g if name == "All" or not len(g) else g[g[f"{mkt}_tier"] == name]
+            close_col = f"{mkt}_result_close"
+            tiers[name] = {
+                "frozen": picks.record(sub[f"{mkt}_result"]) if len(sub) else picks.record([]),
+                "close": picks.record(sub[close_col]) if len(sub) and close_col in sub else picks.record([]),
+            }
         clv = g[f"{mkt}_clv"].dropna() if len(g) else pd.Series(dtype=float)
-        out[mkt] = {"tiers": res, "clv_avg": clv.mean() if len(clv) else None,
+        out[mkt] = {"tiers": tiers, "clv_avg": clv.mean() if len(clv) else None,
                     "clv_beat": (clv > 0).mean() if len(clv) else None, "clv_n": len(clv)}
     return out
 
 
+def pre_policy_notes(rows, sport):
+    early = {}
+    for r in rows:
+        r["pre_policy"] = (int(r["season"]), int(r["week"])) < sport.freeze_policy_from
+        if r["pre_policy"]:
+            day = fmt_captured(r["line_fetched_at"]).split(",")[0].replace("captured ", "")
+            early.setdefault(int(r["week"]), set()).add(day)
+    return [sport.launch_note_tpl.format(week=w, days=", ".join(sorted(d)), label=sport.label)
+            for w, d in sorted(early.items())]
+
+
 # --- build ----------------------------------------------------------------------
 
-def build(sched, graded, week):
-    now = datetime.now(timezone.utc)
-    season = config.CURRENT_SEASON
-    e = env()
-    tmp = OUT.with_name("site.tmp")
-    if tmp.exists():
-        shutil.rmtree(tmp)
-    (tmp / "game").mkdir(parents=True)
-    (tmp / "week").mkdir()
-    shutil.copy(ROOT / "static" / "style.css", tmp / "style.css")
-    shutil.copy(ROOT / "static" / "favicon.svg", tmp / "favicon.svg")
+def _empty_graded():
+    cols = ledger_mod.FILES["picks"] + ["spread_result", "total_result", "spread_result_close", "total_result_close",
+                                         "spread_clv", "total_clv", "final", "home_score", "away_score",
+                                         "close_home_spread", "close_total"]
+    return pd.DataFrame(columns=cols)
 
-    graded = graded if len(graded) else pd.DataFrame(columns=ledger.FILES["picks"])
+
+def build_sport(e, tmp, res, now):
+    sport, sched, week = res["sport"], res["sched"], res["week"]
+    sv = SportView(sport)
+    season = sport.season
+    graded = res["graded"] if len(res["graded"]) else _empty_graded()
+    base = tmp / sport.key
+    (base / "game").mkdir(parents=True)
+    (base / "week").mkdir()
+
     weeks_with_picks = sorted(set(graded["week"].astype(int))) if len(graded) else []
     if week is None:
         week = max(weeks_with_picks) if weeks_with_picks else int(sched[sched.season == season]["week"].max())
     all_weeks = sorted(set(weeks_with_picks) | {week})
 
-    def week_nav(cur):
+    def nav(cur):
         return [{"week": w, "href": f"week/{season}-{w:02d}.html", "current": w == cur} for w in all_weeks]
 
+    pool = sport.rank_pool(season)
+    current = None
     for w in all_weeks:
         games, days = game_views(sched, graded, season, w, now)
-        snap = ledger.read_ratings(season, w)
-        ctx = dict(season=season, week=w, days=days, games=games, nav=week_nav(w), is_current=(w == week),
-                   snap=snap, pending_reason=None)
-        html_week = e.get_template("week.html").render(**ctx, root="../", page="week")
-        (tmp / "week" / f"{season}-{w:02d}.html").write_text(html_week)
+        snap = sport.ledger.read_ratings(season, w)
+        ctx = dict(sp=sv, season=season, week=w, days=days, games=games, snap=snap,
+                   n_locked=sum(g["status"] == "locked" for g in games))
+        (base / "week" / f"{season}-{w:02d}.html").write_text(
+            e.get_template("week.html").render(**ctx, nav=nav(w), root="../../", sroot="../", page="week"))
         if w == week:
-            (tmp / "index.html").write_text(e.get_template("week.html").render(**ctx, root="", page="index"))
+            current = ctx
+            (base / "index.html").write_text(
+                e.get_template("week.html").render(**ctx, nav=nav(w), root="../", sroot="", page="index"))
         fit = ratings.fit_from_dict(snap) if snap else None
         for g in games:
-            ex = explain(fit, g, snap) if fit else None
-            (tmp / "game" / f"{g['id']}.html").write_text(
-                e.get_template("game.html").render(g=g, ex=ex, snap=snap, season=season, week=w, root="../", page="game"))
+            ok = fit is not None and g["home"] in fit.idx and g["away"] in fit.idx
+            ex = explain(fit, g, snap, sv, pool) if ok else None
+            (base / "game" / f"{g['id']}.html").write_text(e.get_template("game.html").render(
+                sp=sv, g=g, ex=ex, snap=snap, season=season, week=w, root="../../", sroot="../", page="game"))
 
-    # record page
-    rec = summary_records(graded, season)
-    rows = graded[graded["season"] == season].sort_values(["week", "kickoff_utc"], ascending=[False, True]) if len(graded) else graded
+    rows = graded[graded["season"] == season].sort_values(["week", "kickoff_utc"], ascending=[False, True]) \
+        if len(graded) else graded
     rows = rows.to_dict("records")
-    early = {}
-    for r in rows:
-        r["pre_policy"] = (int(r["season"]), int(r["week"])) < config.FREEZE_POLICY_FROM
-        if r["pre_policy"]:
-            early.setdefault(int(r["week"]), set()).add(fmt_captured(r["line_fetched_at"]).split(",")[0].replace("captured ", ""))
-    pre_notes = [f"Week {w} lines were captured {', '.join(sorted(days))}, the day the site launched. By then the "
-                 f"market had already moved off its Tuesday numbers, so these are not opening or Tuesday-morning lines."
-                 for w, days in sorted(early.items())]
-    (tmp / "record.html").write_text(e.get_template("record.html").render(
-        rec=rec, rows=rows, season=season, root="", page="record", pre_notes=pre_notes,
-        policy=config.FREEZE_POLICY_FROM))
+    notes = pre_policy_notes(rows, sport)
+    rec = records(graded, season)
+    (base / "record.html").write_text(e.get_template("record.html").render(
+        sp=sv, rec=rec, rows=rows, season=season, root="../", sroot="", page="record", pre_notes=notes))
+    return {"sv": sv, "week": week, "current": current, "rec": rec, "graded": graded}
 
-    # method page with backtest
-    bt_path = ROOT / "results" / "backtest_summary.json"
-    bt = json.loads(bt_path.read_text()) if bt_path.exists() else None
-    (tmp / "method.html").write_text(e.get_template("method.html").render(
-        bt=bt, params=ratings.model_params(), version=ratings.model_version(), root="", page="method"))
 
-    # raw ledger for anyone to audit
-    (tmp / "ledger").mkdir()
-    for f in ledger.LEDGER.glob("*.csv"):
-        shutil.copy(f, tmp / "ledger" / f.name)
-    if ledger.RATINGS.exists():
-        shutil.copytree(ledger.RATINGS, tmp / "ledger" / "ratings")
+def build_all(results):
+    now = datetime.now(timezone.utc)
+    e = env()
+    tmp = OUT.with_name("site.tmp")
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    tmp.mkdir()
+    shutil.copy(ROOT / "static" / "style.css", tmp / "style.css")
+    shutil.copy(ROOT / "static" / "favicon.svg", tmp / "favicon.svg")
+
+    built = [build_sport(e, tmp, r, now) for r in results]
+
+    # hub
+    parts = [b["graded"].assign(sport=b["sv"].key) for b in built if len(b["graded"])]
+    overall = records(pd.concat(parts, ignore_index=True) if parts else _empty_graded())
+    cards = []
+    for b in built:
+        cur = b["current"] or {"games": [], "week": b["week"], "n_locked": 0}
+        locked = [g for g in cur["games"] if g["status"] == "locked"]
+        top = sorted(locked, key=lambda g: -max(g["pick"].get("spread_edge") or 0, g["pick"].get("total_edge") or 0))[:5]
+        cards.append({"sv": b["sv"], "week": cur["week"], "n_games": len(cur["games"]), "n_locked": cur["n_locked"],
+                      "top": top, "rec": b["rec"]})
+    (tmp / "index.html").write_text(e.get_template("home.html").render(overall=overall, cards=cards, root="", page="home"))
+
+    # method page with backtests
+    from nfledge.sports import BY_KEY
+    bts = {}
+    for key in BY_KEY:
+        p = ROOT / "results" / f"backtest_summary_{key}.json"
+        bts[key] = json.loads(p.read_text()) if p.exists() else None
+    params = {k: (ratings.model_params(s.params()), ratings.model_version(s.params())) for k, s in BY_KEY.items()}
+    (tmp / "method.html").write_text(e.get_template("method.html").render(bts=bts, params=params, root="", page="method"))
+
+    # raw ledgers for anyone to audit (NFL paths unchanged since launch)
+    for b in built:
+        led = b["sv"].s.ledger
+        dest = tmp / led.public_prefix
+        dest.mkdir(parents=True, exist_ok=True)
+        for f in led.public_files():
+            shutil.copy(f, dest / f.name)
+        if led.ratings_dir.exists():
+            shutil.copytree(led.ratings_dir, dest / "ratings")
+    (tmp / "ledger").mkdir(exist_ok=True)
     if (ROOT / "backtest_results.md").exists():
         shutil.copy(ROOT / "backtest_results.md", tmp / "ledger" / "backtest_results.md")
     (tmp / "_headers").write_text("/ledger/*\n  Content-Type: text/plain; charset=utf-8\n  Cache-Control: no-cache\n"
                                   "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n")
+    # pre-NCAAF NFL URLs keep working
+    (tmp / "_redirects").write_text("/game/* /nfl/game/:splat 301\n/week/* /nfl/week/:splat 301\n"
+                                    "/record.html /nfl/record.html 301\n")
     (tmp / "404.html").write_text(e.get_template("404.html").render(root="/", page="404"))
 
     if OUT.exists():

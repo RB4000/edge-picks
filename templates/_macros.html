@@ -1,7 +1,7 @@
 {% macro team_line(abbr, rec, score, proj, final, winner) -%}
 <div class="tl{% if final and winner %} tl-win{% endif %}">
-  <img class="logo" src="{{ logo(abbr) }}" alt="" width="32" height="32" loading="lazy">
-  <span class="tl-name"><span class="tl-full">{{ full_name(abbr) }}</span><span class="tl-abbr">{{ abbr }}</span></span>
+  <img class="logo" src="{{ sp.logo(abbr) }}" alt="" width="32" height="32" loading="lazy">
+  <span class="tl-name"><span class="tl-full">{{ sp.name(abbr) }}</span><span class="tl-abbr">{{ sp.abbr(abbr) }}</span></span>
   <span class="tl-rec">{{ rec }}</span>
   {% if final %}<span class="tl-final num">{{ score }}</span>{% endif %}
   <span class="tl-proj num" title="Model projected score">{{ proj|num }}</span>
@@ -16,7 +16,7 @@
 <span class="edgebar {{ slug }}" style="--e: {{ [edge / 7.0, 1.0]|min }}" aria-hidden="true"><span></span></span>
 {%- endmacro %}
 
-{% macro game_card(g, root) -%}
+{% macro game_card(g, sroot) -%}
 {% set p = g.pick %}
 <article class="card status-{{ g.status }}">
   <header class="card-head">
@@ -39,11 +39,11 @@
     <tbody>
       <tr>
         <th scope="row">Spread</th>
-        <td class="num">{{ g.home }} {{ p.line_home_spread|line }}</td>
-        <td class="num">{{ g.home }} {{ p.model_home_spread|line }}</td>
+        <td class="num">{{ sp.abbr(g.home) }} {{ p.line_home_spread|line }}</td>
+        <td class="num">{{ sp.abbr(g.home) }} {{ p.model_home_spread|line }}</td>
         <td class="pick-cell">
           {% if p.spread_pick != 'PASS' %}
-          <span class="pick num">{{ p.spread_pick }} {{ p.spread_pick_line|line }}</span>
+          <span class="pick num">{{ sp.abbr(p.spread_pick) }} {{ p.spread_pick_line|line }}</span>
           <span class="edge"><span class="num">{{ p.spread_edge|num }}</span> pts {{ edgebar(p.spread_edge, p.spread_tier_slug) }}</span>
           {{ result_chip(p.spread_result) }}
           {% else %}<span class="muted">No edge</span>{% endif %}
@@ -68,6 +68,54 @@
   {% else %}
   <p class="note">No pick: a line wasn't captured before kickoff, so nothing was published.</p>
   {% endif %}
-  <a class="card-link" href="{{ root }}game/{{ g.id }}.html">Breakdown <span aria-hidden="true">→</span></a>
+  <a class="card-link" href="{{ sroot }}game/{{ g.id }}.html">Breakdown <span aria-hidden="true">→</span></a>
 </article>
+{%- endmacro %}
+
+{% macro rec_cell(r) -%}
+<span class="num">{{ r.label if (r.n or r.p) else '0-0' }}</span>{% if r.n %} <span class="muted num">{{ r.pct|pct }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro record_tiles(rec) -%}
+<section class="tiles tiles-6">
+  {% for mkt, label in [('spread', 'ATS'), ('total', 'Totals')] %}
+  {% set a = rec[mkt].tiers.All %}
+  <div class="tile">
+    <div class="tile-label">{{ label }} · vs frozen line</div>
+    <div class="tile-big num">{{ a.frozen.label if (a.frozen.n or a.frozen.p) else '0-0' }}</div>
+    <div class="tile-sub"><span class="num">{{ a.frozen.pct|pct }}</span> · <span class="num">{{ a.frozen.units|units }}u</span> at −110</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">{{ label }} · vs closing line</div>
+    <div class="tile-big num">{{ a.close.label if (a.close.n or a.close.p) else '0-0' }}</div>
+    <div class="tile-sub"><span class="num">{{ a.close.pct|pct }}</span> · <span class="num">{{ a.close.units|units }}u</span> at −110</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">{{ label }} · CLV</div>
+    <div class="tile-big num">{{ rec[mkt].clv_avg|signed(2) if rec[mkt].clv_avg is not none else '—' }}</div>
+    <div class="tile-sub">avg pts vs. close{% if rec[mkt].clv_n %} · beat close <span class="num">{{ rec[mkt].clv_beat|pct }}</span> of {{ rec[mkt].clv_n }}{% endif %}</div>
+  </div>
+  {% endfor %}
+</section>
+{%- endmacro %}
+
+{% macro tier_table(rec) -%}
+<div class="tablewrap">
+<table class="data">
+  <thead>
+    <tr><th rowspan="2">Tier</th><th colspan="2" class="grp">ATS</th><th colspan="2" class="grp">Totals</th></tr>
+    <tr><th>vs frozen</th><th>vs close</th><th>vs frozen</th><th>vs close</th></tr>
+  </thead>
+  <tbody>
+  {% for t in ['All'] + tiers %}
+    {% set s = rec.spread.tiers[t] %}{% set o = rec.total.tiers[t] %}
+    <tr{% if t == 'All' %} class="row-strong"{% endif %}>
+      <th scope="row">{{ t }}{% if t != 'All' %} pts{% endif %}</th>
+      <td>{{ rec_cell(s.frozen) }}</td><td>{{ rec_cell(s.close) }}</td>
+      <td>{{ rec_cell(o.frozen) }}</td><td>{{ rec_cell(o.close) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
 {%- endmacro %}

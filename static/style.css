@@ -184,3 +184,22 @@ table.data { border-collapse: collapse; width: 100%; font-size: 13px; margin: 6p
   .intro { padding-top: 40px; }
   .panel { padding: 22px; }
 }
+
+/* multi-sport ------------------------------------------------------------- */
+.subnav { border-top: 1px solid var(--line-soft); background: var(--bg); }
+.subnav-inner { display: flex; gap: 18px; align-items: center; height: 40px; font-size: 13.5px; }
+.subnav-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; color: var(--accent); }
+.subnav a { color: var(--muted); text-decoration: none; padding: 4px 0; border-bottom: 1.5px solid transparent; }
+.subnav a[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); }
+.tiles-6 { grid-template-columns: 1fr 1fr; }
+@media (min-width: 760px) { .tiles-6 { grid-template-columns: repeat(3, 1fr); } }
+.data th.grp { text-align: left; color: var(--muted); border-bottom: 1px solid var(--line-soft); }
+.pb-res { font-size: 12.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.hub { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 900px) { .hub { grid-template-columns: 1fr 1fr; } }
+.hub-card { margin: 0; }
+.hub-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.hub-head h2 { margin: 0; }
+.hub-table td.pick { color: var(--accent); }
+.rk-1 { color: var(--text); }
+.rk-2 { color: var(--muted); }

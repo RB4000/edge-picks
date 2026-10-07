@@ -1,6 +1,6 @@
-# BRAND_NAME — NFL spread & totals model
+# BRAND_NAME — NFL + college football spread & totals model
 
-An opponent-adjusted EPA model that projects every NFL game's score, compares it to the market, and publishes the picks with a locked, timestamped line. A static site shows each week's card, per-game breakdowns, and a season record graded automatically from final scores.
+An opponent-adjusted EPA model that projects every NFL and FBS college game's score, compares it to the market, and publishes the picks with a locked, timestamped line. A static site shows each week's card, per-game breakdowns, and a season record graded automatically from final scores.
 
 > Rename the brand in one place: `BRAND_NAME` in [`config.py`](config.py). The disclaimer text lives there too.
 
@@ -14,7 +14,10 @@ An opponent-adjusted EPA model that projects every NFL game's score, compares it
 
 **3. Pace drives totals.** The same regression on offensive plays per game rates each team's pace and the pace its defense allows. We also track seconds per snap in neutral game states. Projected plays × projected EPA/play → projected points.
 
-**4. Home field is measured, not assumed.** It's the recency-weighted average home margin in non-neutral games since 2021 (currently about +2 points), and it updates as the league changes. International and other neutral-site games get zero home field, including "home" games in London, which nflverse sometimes labels as true home games.
+**4. Home field is measured, not assumed, and enters exactly once.** The regressions include a home/road term, but only as a control so a home-heavy early schedule doesn't inflate a team's ratings. It is thrown away at projection time. Home field enters the projected score once, as points: half added to the home side and half subtracted from the away side, so it moves the spread but not the total.
+- *NFL:* the recency-weighted average home margin in non-neutral games since 2021 (about +2.1). NFL schedules are balanced, so team strength cancels out.
+- *College:* big programs host smaller ones, so a raw average (+4.8) overstates it. A regression of FBS-vs-FBS margins on team-season strength plus a home indicator gives about +3.1.
+- Neutral-site games (international, bowls, and London "home" games nflverse labels as Home) get zero.
 
 **5. Totals are calibrated to how the market prices them.** NFL scoring skews high: a few shootouts pull the *average* game about a point above the *typical* (median) game. The model projects averages, while market totals sit near the median, so an uncalibrated model leans over. Each week's projected totals are shifted by the median gap between model and market totals across every earlier game. The model still says which games should be higher- or lower-scoring than the market expects. It no longer makes a blanket call on the whole league's scoring.
 
@@ -25,8 +28,18 @@ An opponent-adjusted EPA model that projects every NFL game's score, compares it
 - Each game's line is **frozen at the first capture on or after 7:00 AM CT Tuesday** of game week. Picks are graded against it, never against a later number. (Week 5 of 2026, launch week, was frozen at first capture on Wed 10/7. The record page labels those rows.)
 - A pick is generated and locked **once**, before kickoff, after every earlier game's play-by-play is in. It is never revised.
 - The exact ratings used each week are published (`ledger/ratings/2026_w05.json`).
-- Closing lines are recorded after kickoff so **closing line value** (CLV) can be measured.
+- Closing lines are recorded after kickoff. Every pick is graded twice, **vs. the frozen line** (the official record) and **vs. the closing line**, and **closing line value** (CLV) is reported. A model that wins at the frozen line but loses at the close is getting lucky with timing. One that beats the close is finding real edges.
 - Every CSV in `ledger/` is append-only, committed to git, and published at `/ledger/` on the site.
+
+### College football (NCAAF)
+
+The same structure runs on CollegeFootballData play-by-play (PPA = their EPA) since 2021, with a few college-specific choices:
+- garbage time is defined by score margin (>43/37/27/22 points in Q1–Q4)
+- FCS and lower-division opponents get their own baseline, so cupcake games don't distort FBS ratings
+- stronger regression to the mean between seasons (50%, vs. 40% in the NFL)
+- home field is estimated separately (see above)
+
+Picks are published only for FBS-vs-FBS games with a market line. CFBD's free tier is 1,000 calls/month; history is cached forever, and a normal day uses ~3 calls.
 
 ### What the model doesn't know
 
@@ -36,7 +49,7 @@ Injuries, QB changes, weather, travel, motivation — except as they've already 
 
 Before each week, ratings were refit using only earlier games. Picks were graded against **closing** lines at −110 (break-even 52.4%). Parameters were set before the backtest and **not tuned to it**. Full report with confidence intervals and a parameter-sensitivity table: [`backtest_results.md`](backtest_results.md).
 
-Headline (v1.1): **ATS 547-563-29 (49.3%), totals 554-575-10 (49.1%)**, so no demonstrated edge against closing lines. The 3.5+ tiers ran 51.9% ATS and 52.4% on totals, both within noise. The totals calibration moved the over/under split of picks from 61/39 to 50/50 and totals from 48.0% to 49.1% (before/after table in the report). These results are published as is. CLV on the live record page is the faster test of whether the model's early-week numbers beat where the market settles.
+Headline, NFL (v1.1): **ATS 547-563-29 (49.3%), totals 554-575-10 (49.1%)**. NCAAF (v1.0, FBS vs FBS): **ATS 1557-1551-66 (50.1%), totals 1627-1502-45 (52.0%)**. Neither beats closing lines at −110 (break-even 52.4%). The college model's spreads are badly compressed: projected margins have about 40% of the market's spread, so most big "edges" are the model taking large underdogs. Read the college numbers with that in mind. These results are published as is.
 
 ---
 
@@ -44,10 +57,10 @@ Headline (v1.1): **ATS 547-563-29 (49.3%), totals 554-575-10 (49.1%)**, so no de
 
 ```bash
 make setup      # Python 3.11–3.13 virtualenv + deps (nfl_data_py's pandas<2 pin won't build on 3.13+, so this uses nflreadpy)
-cp .env.example .env   # then add ODDS_API_KEY
+cp .env.example .env   # then add ODDS_API_KEY and CFBD_API_KEY
 make update     # refresh data → capture/freeze lines → lock picks → regrade → rebuild ./site
 make sheet      # print this week's pick sheet
-make backtest   # rerun the walk-forward backtest → backtest_results.md
+make backtest   # rerun both walk-forward backtests → backtest_results.md (add SPORT=nfl|ncaaf for one)
 make serve      # preview at http://localhost:8000
 make deploy     # Cloudflare Pages (asks for a project name the first time)
 ```

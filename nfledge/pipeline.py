@@ -1,11 +1,14 @@
-"""`python -m nfledge.pipeline update` — the one idempotent command.
+"""`python -m nfledge.pipeline update` — the one idempotent command, for every sport.
 
-1. refresh nflverse schedules + play-by-play
-2. capture market lines for the current week (snapshot every run; freeze the first one seen)
-3. once every earlier game is final and in the play-by-play, fit ratings and lock picks
-   for any not-yet-started game that has a frozen line (once per game, never revised)
+Per sport:
+1. refresh schedules + play-by-play (nflverse for NFL, CollegeFootballData for NCAAF)
+2. snapshot market lines for the current week (and next week once its freeze window opens);
+   freeze each game's line at the first capture inside its freeze window
+3. once earlier games are final and in the play-by-play, fit ratings and lock picks for any
+   not-yet-started game with a frozen line (once per game, never revised)
 4. record closing lines for finished games
-5. regrade everything from final scores and rebuild ./site
+5. regrade everything (vs the frozen line AND vs the closing line)
+Then rebuild ./site.
 """
 import argparse
 import fcntl
@@ -18,10 +21,10 @@ import numpy as np
 import pandas as pd
 
 import config
-from nfledge import data, ledger, lines, picks, ratings
+from nfledge import lines, picks, ratings
+from nfledge.sports import BY_KEY, SPORTS
 
 ROOT = Path(__file__).resolve().parent.parent
-ET = ZoneInfo("America/New_York")
 
 
 def log(msg):
@@ -32,158 +35,163 @@ def utc_iso(dt):
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def add_kickoffs(sched):
-    s = sched.copy()
-    t = s["gametime"].fillna("13:00")
-    local = pd.to_datetime(s["gameday"] + " " + t).dt.tz_localize(ET)
-    s["kickoff_utc"] = local.dt.tz_convert("UTC")
-    return s
-
-
-def current_week(sched, season):
-    cur = sched[sched["season"] == season]
-    pending = cur[~cur["final"]]
-    return int(pending["week"].min()) if len(pending) else None
-
-
-def ready_to_lock(sched, team_games, season, week):
-    """All earlier games must be final AND present in play-by-play, or ratings would be stale."""
-    prior = sched[(sched["season"] == season) & (sched["week"] < week)]
-    if not prior["final"].all():
-        return False, "earlier games not final yet"
-    missing = set(prior["game_id"]) - set(team_games["game_id"])
-    if missing:
-        return False, f"play-by-play not yet published for {len(missing)} game(s): {sorted(missing)[:3]}"
-    return True, ""
-
-
-def freeze_open(sched, season, week):
-    """UTC time a week's freeze window opens: FREEZE_HOUR (Central) on the Tuesday before the week's
-    first kickoff. None for weeks before FREEZE_POLICY_FROM (those froze at first capture)."""
-    if (season, week) < config.FREEZE_POLICY_FROM:
-        return None
-    wk = sched[(sched["season"] == season) & (sched["week"] == week)]
-    if wk.empty:
-        return None
-    tz = ZoneInfo(config.FREEZE_TZ)
-    first = wk["kickoff_utc"].min().tz_convert(tz).date()
-    back = (first.weekday() - config.FREEZE_WEEKDAY) % 7 or 7
-    day = first - timedelta(days=back)
-    return datetime(day.year, day.month, day.day, config.FREEZE_HOUR, tzinfo=tz).astimezone(timezone.utc)
-
-
-def capture_lines(sched, season, week, now, only_if_open=False):
-    """Snapshot lines for a week's upcoming games; freeze those captured inside the freeze window."""
-    wk = sched[(sched["season"] == season) & (sched["week"] == week)]
-    upcoming = wk[wk["kickoff_utc"] > now]
-    if upcoming.empty:
-        return
-    opens = freeze_open(sched, season, week)
-    window_open = opens is None or now >= opens
-    if only_if_open and not window_open:
-        return
-    if opens is not None:
-        log(f"  week {week}: freeze window {'opened' if window_open else 'opens'} {fmt_local(opens)}")
-    got = lines.fetch(sched[sched["season"] == season], season, week, log=log,
-                      not_before=opens if window_open else None)
-    got = got[got["game_id"].isin(upcoming["game_id"])]
-    run_at = utc_iso(now)
-    seen = set(zip(*[ledger.read("line_snapshots")[c] for c in ("game_id", "fetched_at")])) or set()
-    snaps = [{**r, "run_at": run_at} for r in got.to_dict("records") if (r["game_id"], r["fetched_at"]) not in seen]
-    n_snap = ledger.append("line_snapshots", snaps, unique=False)
-    freezable = [r for r in got.to_dict("records")
-                 if opens is None or pd.Timestamp(r["fetched_at"]) >= pd.Timestamp(opens)]
-    n_frz = ledger.append("frozen_lines", [{**r, "frozen_at": run_at} for r in freezable])
-    log(f"  week {week} lines: {n_snap} snapshots recorded, {n_frz} newly frozen")
-
-
 def fmt_local(dt):
     return dt.astimezone(ZoneInfo(config.FREEZE_TZ)).strftime("%a %b %-d %-I:%M %p %Z")
 
 
-def lock_picks(sched, team_games, season, week, now):
-    ok, why = ready_to_lock(sched, team_games, season, week)
-    if not ok:
-        log(f"  picks: not locking yet — {why}")
-        return
-    snap = ledger.read_ratings(season, week)
-    if snap is None:
-        fit = ratings.RatingsEngine(team_games, sched).as_of(season, week)
-        thru = team_games[(team_games["season"] == season) & (team_games["week"] < week)]
-        snap = ratings.fit_to_dict(fit, {
-            "season": season, "week": week, "fit_at": utc_iso(now),
-            "data_through": f"{season} week {week - 1}" if len(thru) else f"{season - 1} season (prior only)",
-            "model_version": ratings.model_version(),
-        })
-        p = ledger.write_ratings_once(season, week, snap)
-        log(f"  ratings: wrote {p.name}")
-    fit = ratings.fit_from_dict(snap)
+# --- freeze window ----------------------------------------------------------------------
 
-    frozen = ledger.read("frozen_lines").set_index("game_id")
-    locked = set(ledger.read("picks")["game_id"])
-    wk = sched[(sched["season"] == season) & (sched["week"] == week)]
-    rows = []
+def freeze_open(sport, season, week, kickoff_utc):
+    """UTC time this game's freeze window opens: FREEZE_HOUR Central on the most recent Tuesday at or
+    before kickoff. None for weeks before the sport's freeze policy start (frozen at first capture)."""
+    if (season, week) < sport.freeze_policy_from:
+        return None
+    tz = ZoneInfo(config.FREEZE_TZ)
+    ko = kickoff_utc.tz_convert(tz)
+    day = ko.date() - timedelta(days=(ko.weekday() - config.FREEZE_WEEKDAY) % 7)
+    opens = datetime(day.year, day.month, day.day, config.FREEZE_HOUR, tzinfo=tz)
+    if opens > ko:  # a Tuesday game before 7am: use the previous Tuesday
+        opens -= timedelta(days=7)
+    return opens.astimezone(timezone.utc)
+
+
+def capture_lines(sport, sched, week, now):
+    led = sport.ledger
+    s = sched[(sched["season"] == sport.season) & sched["pickable"]]
+    games = s[s["week"].isin([week, week + 1]) & (s["kickoff_utc"] > now)].copy()
+    if games.empty:
+        return
+    opens = {gid: freeze_open(sport, sport.season, w, k)
+             for gid, w, k in zip(games["game_id"], games["week"], games["kickoff_utc"])}
+    is_open = {gid: (o is None or o <= now) for gid, o in opens.items()}
+    # next week only once its window is open (e.g. Tuesday 7am even if Monday night isn't final)
+    games = games[(games["week"] == week) | games["game_id"].map(is_open)]
+    if games.empty:
+        log(f"  {sport.key} lines: nothing in scope (next week's freeze window not open yet)")
+        return
+    for w in sorted(games["week"].unique()):
+        o = [opens[g] for g in games.loc[games["week"] == w, "game_id"] if opens[g] is not None]
+        if o:
+            log(f"  {sport.key} week {w}: freeze window {'opened' if min(o) <= now else 'opens'} {fmt_local(min(o))}")
+        else:
+            log(f"  {sport.key} week {w}: launch week, lines freeze at first capture")
+    frozen = set(led.read("frozen_lines")["game_id"])
+    open_unfrozen = [opens[g] for g in games["game_id"]
+                     if opens[g] is not None and opens[g] <= now and g not in frozen]
+    got = lines.fetch(sport.feed(sched), sched[sched["season"] == sport.season], sport.season, week, log=log,
+                      not_before=max(open_unfrozen) if open_unfrozen else None, want=set(games["game_id"]))
+    got = got[got["game_id"].isin(games["game_id"])]
+    run_at = utc_iso(now)
+    snaps_df = led.read("line_snapshots")
+    seen = set(zip(snaps_df["game_id"].astype(str), snaps_df["fetched_at"]))
+    recs = got.to_dict("records")
+    n_snap = led.append("line_snapshots", [{**r, "run_at": run_at} for r in recs
+                                           if (str(r["game_id"]), r["fetched_at"]) not in seen], unique=False)
+    freezable = [r for r in recs if opens.get(r["game_id"]) is None
+                 or pd.Timestamp(r["fetched_at"]) >= pd.Timestamp(opens[r["game_id"]])]
+    n_frz = led.append("frozen_lines", [{**r, "frozen_at": run_at} for r in freezable])
+    log(f"  {sport.key} lines: {n_snap} snapshots recorded, {n_frz} newly frozen "
+        f"({len(games)} upcoming games in scope, {len(got)} with a market line)")
+
+
+# --- locking ----------------------------------------------------------------------------
+
+def lock_picks(sport, sched, tg, groups, week, now):
+    led = sport.ledger
+    ok, why = sport.ready_to_lock(sched, tg, week, now)
+    if not ok:
+        log(f"  {sport.key} picks: not locking yet — {why}")
+        return
+    snap = led.read_ratings(sport.season, week)
+    if snap is None:
+        fit = sport.engine(tg, sched, groups).as_of(sport.season, week)
+        thru = tg[(tg["season"] == sport.season) & (tg["week"] < week)]
+        snap = ratings.fit_to_dict(fit, {
+            "season": sport.season, "week": week, "fit_at": utc_iso(now),
+            "data_through": f"{sport.season} week {week - 1}" if len(thru) else f"{sport.season - 1} season (prior only)",
+            "model_version": ratings.model_version(sport.params()),
+        }, sport.params())
+        p = led.write_ratings_once(sport.season, week, snap)
+        log(f"  {sport.key} ratings: wrote {p.name}")
+    fit = ratings.fit_from_dict(snap)
+    idx = fit.idx
+    frozen = led.read("frozen_lines").set_index("game_id")
+    locked = set(led.read("picks")["game_id"])
+    wk = sched[(sched["season"] == sport.season) & (sched["week"] == week) & sched["pickable"]]
+    rows, skipped = [], 0
     for _, g in wk.iterrows():
         if g.game_id in locked or g.game_id not in frozen.index or g.kickoff_utc <= now:
+            continue
+        if g.home_team not in idx or g.away_team not in idx:
+            skipped += 1
             continue
         fl = frozen.loc[g.game_id]
         pr = ratings.project(fit, g.home_team, g.away_team, g.neutral)
         pk = picks.make_pick(g.home_team, g.away_team, pr["margin"], pr["total"], fl.home_spread, fl.total)
         rows.append({
-            "game_id": g.game_id, "season": season, "week": week, "kickoff_utc": utc_iso(g.kickoff_utc),
+            "game_id": g.game_id, "season": sport.season, "week": week, "kickoff_utc": utc_iso(g.kickoff_utc),
             "away": g.away_team, "home": g.home_team, "locked_at": utc_iso(now),
             "line_home_spread": fl.home_spread, "line_total": fl.total,
             "line_source": fl.source, "line_fetched_at": fl.fetched_at,
             "model_away_pts": round(pr["away_pts"], 2), "model_home_pts": round(pr["home_pts"], 2),
             "model_home_spread": round(pr["model_home_spread"], 2), "model_total": round(pr["total"], 2),
-            **pk, "ratings_file": ledger.ratings_path(season, week).name, "model_version": snap["model_version"],
+            **pk, "ratings_file": led.ratings_path(sport.season, week).name, "model_version": snap["model_version"],
         })
-    n = ledger.append("picks", rows)
-    log(f"  picks: {n} newly locked for {season} week {week}")
+    n = led.append("picks", rows)
+    log(f"  {sport.key} picks: {n} newly locked for {sport.season} week {week}"
+        + (f" ({skipped} skipped: team missing from ratings)" if skipped else ""))
 
 
-def record_closing(sched, now):
-    """Closing line = nflverse closing line once final; never overwritten afterwards."""
-    pk = ledger.read("picks")
-    have = set(ledger.read("closing_lines")["game_id"])
+def record_closing(sport, sched, now):
+    """Closing line = the sport's published closing line once final (nflverse / CFBD consensus);
+    otherwise our last pre-kickoff snapshot. Written once, never overwritten."""
+    led = sport.ledger
+    pk = led.read("picks")
+    have = set(led.read("closing_lines")["game_id"])
     done = sched[sched["final"] & sched["game_id"].isin(pk["game_id"]) & ~sched["game_id"].isin(have)]
-    snaps = ledger.read("line_snapshots")
+    snaps = led.read("line_snapshots")
+    source = {"nfl": "nflverse closing line", "ncaaf": "CFBD closing consensus"}[sport.key]
     rows = []
     for _, g in done.iterrows():
         if pd.notna(g.close_home_spread) and pd.notna(g.close_total):
             rows.append({"game_id": g.game_id, "close_home_spread": g.close_home_spread,
-                         "close_total": g.close_total, "close_source": "nflverse closing line",
-                         "recorded_at": utc_iso(now)})
-        else:  # fall back to our last pre-kickoff snapshot
+                         "close_total": g.close_total, "close_source": source, "recorded_at": utc_iso(now)})
+        else:
             s = snaps[(snaps["game_id"] == g.game_id) & (pd.to_datetime(snaps["fetched_at"]) < g.kickoff_utc)]
             if len(s):
                 last = s.iloc[-1]
-                rows.append({"game_id": g.game_id, "close_home_spread": last.home_spread,
-                             "close_total": last.total, "close_source": f"last pre-kickoff snapshot ({last.source})",
-                             "recorded_at": utc_iso(now)})
-    n = ledger.append("closing_lines", rows)
+                rows.append({"game_id": g.game_id, "close_home_spread": last.home_spread, "close_total": last.total,
+                             "close_source": f"last pre-kickoff snapshot ({last.source})", "recorded_at": utc_iso(now)})
+    n = led.append("closing_lines", rows)
     if n:
-        log(f"  closing lines: {n} recorded")
+        log(f"  {sport.key} closing lines: {n} recorded")
 
 
-def graded(sched):
-    """Picks joined with results, grades and CLV. Derived on every run, never stored by hand."""
-    pk = ledger.read("picks")
+def graded(sport, sched):
+    """Picks joined with results: graded vs the frozen line AND vs the closing line, plus CLV."""
+    led = sport.ledger
+    pk = led.read("picks")
     if pk.empty:
         return pk
     res = sched[["game_id", "home_score", "away_score", "final"]]
-    cl = ledger.read("closing_lines")
+    cl = led.read("closing_lines")
     g = pk.merge(res, on="game_id", how="left").merge(cl, on="game_id", how="left")
 
     def row(r):
-        out = {"spread_result": None, "total_result": None, "spread_clv": np.nan, "total_clv": np.nan}
-        if r.final:
+        out = {"spread_result": None, "total_result": None, "spread_result_close": None, "total_result_close": None,
+               "spread_clv": np.nan, "total_clv": np.nan}
+        has_close = pd.notna(r.get("close_home_spread")) and pd.notna(r.get("close_total"))
+        if r.final == True:  # noqa: E712 (NaN-safe)
             out["spread_result"] = picks.grade_spread(r.spread_pick, r.home, r.line_home_spread, r.home_score, r.away_score)
             out["total_result"] = picks.grade_total(r.total_pick, r.line_total, r.home_score, r.away_score)
-        if pd.notna(r.get("close_home_spread")) and r.spread_pick not in (None, "PASS"):
+            if has_close:
+                out["spread_result_close"] = picks.grade_spread(r.spread_pick, r.home, r.close_home_spread,
+                                                                r.home_score, r.away_score)
+                out["total_result_close"] = picks.grade_total(r.total_pick, r.close_total, r.home_score, r.away_score)
+        if has_close and r.spread_pick not in (None, "PASS"):
             close_pick_line = r.close_home_spread if r.spread_pick == r.home else -r.close_home_spread
             out["spread_clv"] = r.spread_pick_line - close_pick_line
-        if pd.notna(r.get("close_total")) and r.total_pick in ("OVER", "UNDER"):
+        if has_close and r.total_pick in ("OVER", "UNDER"):
             d = r.close_total - r.line_total
             out["total_clv"] = d if r.total_pick == "OVER" else -d
         return pd.Series(out)
@@ -191,7 +199,27 @@ def graded(sched):
     return pd.concat([g, g.apply(row, axis=1)], axis=1)
 
 
-def update(build=True, refresh=True):
+# --- orchestration ------------------------------------------------------------------------
+
+def run_sport(sport, now, refresh=True):
+    log(f"{sport.label}: refreshing schedules + play-by-play")
+    sched, tg, groups = sport.load(refresh=refresh)
+    week = sport.current_week(sched, now)
+    if week is None:
+        log(f"{sport.label}: {sport.season} season complete; regrading only")
+    else:
+        log(f"{sport.label}: current week {sport.season} week {week}")
+        capture_lines(sport, sched, week, now)
+        lock_picks(sport, sched, tg, groups, week, now)
+    record_closing(sport, sched, now)
+    g = graded(sport, sched)
+    if len(g):
+        g.to_csv(sport.ledger.root / "graded.csv", index=False)
+    return {"sport": sport, "sched": sched, "graded": g, "week": week}
+
+
+def update(build=True, refresh=True, only=None):
+    (ROOT / "data").mkdir(exist_ok=True)
     lockfile = open(ROOT / "data" / ".update.lock", "w")
     try:
         fcntl.flock(lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -199,50 +227,59 @@ def update(build=True, refresh=True):
         log("another update is running; exiting")
         return 0
     now = datetime.now(timezone.utc)
-    season = config.CURRENT_SEASON
-    log("refreshing nflverse schedules + play-by-play")
-    sched = add_kickoffs(data.load_schedules(refresh=refresh))
-    tg = data.load_team_games(sched, refresh_current=refresh)
-    week = current_week(sched, season)
-    if week is None:
-        log(f"{season} season complete; regrading and rebuilding only")
-    else:
-        log(f"current week: {season} week {week}")
-        capture_lines(sched, season, week, now)
-        capture_lines(sched, season, week + 1, now, only_if_open=True)  # e.g. Tue 7am before MNF is final
-        lock_picks(sched, tg, season, week, now)
-    record_closing(sched, now)
-    g = graded(sched)
-    if len(g):
-        g.to_csv(ROOT / "ledger" / "graded.csv", index=False)
-    if build:
+    results, failed = [], []
+    for sport in SPORTS:
+        if only and sport.key != only:
+            continue
+        try:
+            results.append(run_sport(sport, now, refresh))
+        except Exception as e:  # one sport's outage must not block the other
+            log(f"{sport.label}: FAILED ({type(e).__name__}: {e})")
+            failed.append(sport.key)
+    from nfledge import cfbd
+    log(cfbd.usage_line())
+    u = lines.odds_usage()
+    if u:
+        log(f"Odds API: {u[0]} credits used this month, {u[1]} remaining")
+    if build and results:
         from nfledge import site
-        site.build(sched, g, week)
+        site.build_all(results if not only else load_results())
         log("site rebuilt -> ./site")
-    return 0
+    return 1 if failed else 0
+
+
+def load_results(refresh=False):
+    now = datetime.now(timezone.utc)
+    out = []
+    for sport in SPORTS:
+        sched, _, _ = sport.load(refresh=refresh)
+        out.append({"sport": sport, "sched": sched, "graded": graded(sport, sched),
+                    "week": sport.current_week(sched, now)})
+    return out
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["update", "build", "backtest", "sheet"])
-    ap.add_argument("--no-refresh", action="store_true", help="use cached nflverse data")
+    ap.add_argument("--sport", choices=list(BY_KEY), help="limit to one sport")
+    ap.add_argument("--no-refresh", action="store_true", help="use cached data")
     a = ap.parse_args(argv)
     if a.cmd == "update":
-        return update(refresh=not a.no_refresh)
+        return update(refresh=not a.no_refresh, only=a.sport)
     if a.cmd == "build":
         from nfledge import site
-        sched = add_kickoffs(data.load_schedules(refresh=False))
-        site.build(sched, graded(sched), current_week(sched, config.CURRENT_SEASON))
+        site.build_all(load_results())
         return 0
     if a.cmd == "backtest":
         from nfledge import backtest
-        backtest.main()
+        backtest.main(only=a.sport)
         print((ROOT / "backtest_results.md").read_text())
         return 0
     if a.cmd == "sheet":
         from nfledge import sheet
-        sched = add_kickoffs(data.load_schedules(refresh=False))
-        sheet.print_sheet(sched, current_week(sched, config.CURRENT_SEASON))
+        for r in load_results():
+            if not a.sport or r["sport"].key == a.sport:
+                sheet.print_sheet(r["sport"], r["sched"], r["week"])
         return 0
 
 

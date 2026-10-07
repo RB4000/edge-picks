@@ -1,12 +1,15 @@
-"""The public ledger. Append-only CSV/JSON files in ./ledger, committed to git.
+"""The public ledger. Append-only CSV/JSON files, committed to git.
+
+NFL lives in ./ledger (its original location, unchanged since launch); NCAAF in ./ledger/ncaaf.
 
   line_snapshots.csv   every line observed for every upcoming game, every run
-  frozen_lines.csv     the FIRST line observed per game; written once, never changed
+  frozen_lines.csv     the line each pick is graded on; written once, never changed
   picks.csv            one row per game, written once before kickoff, never changed
   closing_lines.csv    the closing line per game, written once the game is final
   ratings/S_wWW.json   the full rating fit used to make that week's picks
+  graded.csv           derived on every run from the files above + final scores (not hand-edited)
 
-Nothing here is edited by hand. Rows are only ever appended; existing game_ids are skipped.
+Rows are only ever appended; existing game_ids are skipped.
 """
 import csv
 import json
@@ -17,8 +20,6 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-LEDGER = ROOT / "ledger"
-RATINGS = LEDGER / "ratings"
 
 FILES = {
     "line_snapshots": ["game_id", "home_spread", "total", "source", "fetched_at", "run_at"],
@@ -34,54 +35,67 @@ FILES = {
 }
 
 
-def path(name):
-    return LEDGER / f"{name}.csv"
+class Ledger:
+    def __init__(self, root: Path, public_prefix: str):
+        self.root = Path(root)
+        self.ratings_dir = self.root / "ratings"
+        self.public_prefix = public_prefix  # where the files are served on the site, e.g. "ledger/ncaaf/"
 
+    def path(self, name):
+        return self.root / f"{name}.csv"
 
-def read(name):
-    p = path(name)
-    if not p.exists():
-        return pd.DataFrame(columns=FILES[name])
-    return pd.read_csv(p, dtype={"game_id": str})
+    def read(self, name):
+        p = self.path(name)
+        if not p.exists():
+            return pd.DataFrame(columns=FILES[name])
+        return pd.read_csv(p, dtype={"game_id": str})
 
+    def append(self, name, rows, unique=True):
+        """Append rows. With unique=True, rows whose game_id already exists are silently skipped."""
+        if not rows:
+            return 0
+        self.root.mkdir(parents=True, exist_ok=True)
+        existing = set(self.read(name)["game_id"]) if unique else set()
+        rows = [r for r in rows if not unique or str(r["game_id"]) not in existing]
+        if not rows:
+            return 0
+        p = self.path(name)
+        new = not p.exists()
+        with open(p, "a", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=FILES[name], extrasaction="ignore")
+            if new:
+                w.writeheader()
+            w.writerows(rows)
+            f.flush()
+            os.fsync(f.fileno())
+        return len(rows)
 
-def append(name, rows, unique=True):
-    """Append rows. With unique=True, rows whose game_id already exists are silently skipped."""
-    if not rows:
-        return 0
-    LEDGER.mkdir(exist_ok=True)
-    existing = set(read(name)["game_id"]) if unique else set()
-    rows = [r for r in rows if not unique or r["game_id"] not in existing]
-    if not rows:
-        return 0
-    p = path(name)
-    new = not p.exists()
-    with open(p, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FILES[name], extrasaction="ignore")
-        if new:
-            w.writeheader()
-        w.writerows(rows)
-        f.flush()
-        os.fsync(f.fileno())
-    return len(rows)
+    def ratings_path(self, season, week):
+        return self.ratings_dir / f"{season}_w{week:02d}.json"
 
-
-def ratings_path(season, week):
-    return RATINGS / f"{season}_w{week:02d}.json"
-
-
-def write_ratings_once(season, week, payload):
-    p = ratings_path(season, week)
-    if p.exists():
+    def write_ratings_once(self, season, week, payload):
+        p = self.ratings_path(season, week)
+        if p.exists():
+            return p
+        self.ratings_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=self.ratings_dir, suffix=".tmp")
+        with os.fdopen(fd, "w") as f:
+            json.dump(payload, f, indent=1)
+        os.replace(tmp, p)
         return p
-    RATINGS.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=RATINGS, suffix=".tmp")
-    with os.fdopen(fd, "w") as f:
-        json.dump(payload, f, indent=1)
-    os.replace(tmp, p)
-    return p
+
+    def read_ratings(self, season, week):
+        p = self.ratings_path(season, week)
+        return json.loads(p.read_text()) if p.exists() else None
+
+    def public_files(self):
+        return sorted(self.root.glob("*.csv"))
 
 
-def read_ratings(season, week):
-    p = ratings_path(season, week)
-    return json.loads(p.read_text()) if p.exists() else None
+NFL = Ledger(ROOT / "ledger", "ledger/")
+NCAAF = Ledger(ROOT / "ledger" / "ncaaf", "ledger/ncaaf/")
+
+# Backwards-compatible module-level API (NFL).
+LEDGER, RATINGS = NFL.root, NFL.ratings_dir
+read, append, path = NFL.read, NFL.append, NFL.path
+ratings_path, write_ratings_once, read_ratings = NFL.ratings_path, NFL.write_ratings_once, NFL.read_ratings

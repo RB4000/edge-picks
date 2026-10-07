@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "_macros.html" import record_tiles, tier_table with context %}
+{% block title %}{{ cfg.BRAND_NAME }}{% endblock %}
+{% block content %}
+<section class="intro">
+  <p class="eyebrow">NFL + NCAAF · {{ cfg.CURRENT_SEASON }}</p>
+  <h1>{{ cfg.BRAND_NAME }}</h1>
+  <p class="lede">{{ cfg.BRAND_TAGLINE }}</p>
+</section>
+
+<h2 class="day-label">Overall record, all sports</h2>
+{{ record_tiles(overall) }}
+
+<div class="hub">
+{% for c in cards %}
+{% set sp = c.sv %}
+<section class="panel hub-card">
+  <div class="hub-head">
+    <h2>{{ sp.label }} · Week {{ c.week }}</h2>
+    <a class="card-link" href="{{ sp.key }}/index.html">Full card <span aria-hidden="true">→</span></a>
+  </div>
+  <p class="fine">{{ c.n_locked }} of {{ c.n_games }} games locked{% if sp.key == 'ncaaf' %} (FBS vs FBS with a market line){% endif %} · season: ATS {{ c.rec.spread.tiers.All.frozen.label or '0-0' }}, totals {{ c.rec.total.tiers.All.frozen.label or '0-0' }} · <a href="{{ sp.key }}/record.html">record</a></p>
+  {% if c.top %}
+  <table class="data hub-table">
+    <thead><tr><th>Game</th><th>Spread</th><th>Edge</th><th>Total</th><th>Edge</th></tr></thead>
+    <tbody>
+    {% for g in c.top %}{% set p = g.pick %}
+      <tr>
+        <td><a href="{{ sp.key }}/game/{{ g.id }}.html">{{ sp.abbr(g.away) }} @ {{ sp.abbr(g.home) }}</a></td>
+        <td class="num pick">{{ sp.abbr(p.spread_pick) if p.spread_pick != 'PASS' else '—' }} {{ p.spread_pick_line|line if p.spread_pick != 'PASS' else '' }}</td>
+        <td class="num">{{ p.spread_edge|num }}</td>
+        <td class="num pick">{{ p.total_pick|title }} {{ p.line_total|num }}</td>
+        <td class="num">{{ p.total_edge|num }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="fine">Largest model edges this week. Edge size isn't confidence: see the backtest on the <a href="method.html">Method</a> page.</p>
+  {% else %}
+  <p class="note">No picks locked yet this week.</p>
+  {% endif %}
+</section>
+{% endfor %}
+</div>
+{% endblock %}

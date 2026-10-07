@@ -20,16 +20,26 @@ from nfledge import data, picks, ratings
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def run(schedules, team_games, seasons=None):
-    seasons = seasons or config.BACKTEST_SEASONS
-    schedules = data.with_neutral_rule(schedules, config.NEUTRAL_RULE)
-    team_games = data.apply_neutral(team_games, schedules)
-    eng = ratings.RatingsEngine(team_games, schedules)
+def run(schedules, team_games, seasons=None, sport=None, params=None, groups=None):
+    """sport=None -> NFL (with the configured neutral rule). For NCAAF pass sport, params and groups."""
+    if sport is None or sport.key == "nfl":
+        seasons = seasons or config.BACKTEST_SEASONS
+        schedules = data.with_neutral_rule(schedules, config.NEUTRAL_RULE)
+        team_games = data.apply_neutral(team_games, schedules)
+        eng = ratings.RatingsEngine(team_games, schedules)
+        games = schedules[schedules["season"].isin(seasons) & schedules["final"]]
+    else:
+        seasons = seasons or config.NCAAF_BACKTEST_SEASONS
+        eng = ratings.RatingsEngine(team_games, schedules, params or sport.params(), groups)
+        games = schedules[schedules["season"].isin(seasons) & schedules["final"] & schedules["pickable"]
+                          & schedules["close_home_spread"].notna() & schedules["close_total"].notna()]
     rows = []
-    games = schedules[schedules["season"].isin(seasons) & schedules["final"]]
     for (season, week), wk in games.groupby(["season", "week"]):
         fit = eng.as_of(season, week)
+        idx = fit.idx
         for _, g in wk.iterrows():
+            if g.home_team not in idx or g.away_team not in idx:
+                continue
             pr = ratings.project(fit, g.home_team, g.away_team, g.neutral)
             pk = picks.make_pick(g.home_team, g.away_team, pr["margin"], pr["total"],
                                  g.close_home_spread, g.close_total)
@@ -100,71 +110,64 @@ def _fmt(r):
     return (r["label"], f"{r['pct']:.1%}", f"{r['units']:+.1f}u", f"{r['p_value']:.2f}")
 
 
-def _before_after(before, after):
-    L = ["## Totals calibration: v1.0 → v1.1\n",
-         "v1.0 projected the *mean* total. NFL totals skew right (mean ≈ 1 pt above median) and market totals "
-         "sit near the median, so v1.0 leaned over. v1.1 subtracts a walk-forward offset: the recency-weighted "
-         "median of (model total − market total) over all games before the prediction week. Spreads are unchanged.\n",
-         "| | v1.0 | v1.1 |", "|---|---|---|",
+def _before_after(before, after, title, why, labels):
+    b_lab, a_lab = labels
+    L = [f"## {title}\n", why + "\n",
+         f"| | {b_lab} | {a_lab} |", "|---|---|---|",
          f"| Over share of total picks | {before['over_share']:.1%} | {after['over_share']:.1%} |",
          f"| Median model − market total | {before['model_minus_market_total_median']:+.2f} | "
          f"{after['model_minus_market_total_median']:+.2f} |",
          f"| Model total MAE | {before['accuracy']['model_total_mae']:.2f} | {after['accuracy']['model_total_mae']:.2f} |",
-         "", "| Tier | v1.0 totals | v1.0 % | v1.0 units | v1.1 totals | v1.1 % | v1.1 units |",
+         "", f"| Tier | {b_lab} totals | {b_lab} % | {b_lab} units | {a_lab} totals | {a_lab} % | {a_lab} units |",
          "|---|---|---|---|---|---|---|"]
     for k in after["total"]:
-        b, a = before["total"][k], after["total"][k]
-        L.append(f"| {k} | {b['label']} | {b['pct']:.1%} | {b['units']:+.1f}u | {a['label']} | {a['pct']:.1%} | {a['units']:+.1f}u |")
+        bb, aa = before["total"][k], after["total"][k]
+        L.append(f"| {k} | {bb['label']} | {bb['pct']:.1%} | {bb['units']:+.1f}u | {aa['label']} | {aa['pct']:.1%} | {aa['units']:+.1f}u |")
     L.append("")
     return L
 
 
-def write_report(summary, sens, path, before=None):
+NFL_CALIB_WHY = ("v1.0 projected the *mean* total. NFL totals skew right (mean ≈ 1 pt above median) and market totals "
+                 "sit near the median, so v1.0 leaned over. v1.1 subtracts a walk-forward offset: the recency-weighted "
+                 "median of (model total − market total) over all games before the prediction week. Spreads are unchanged.")
+NCAAF_CALIB_WHY = ("Same median-gap calibration as the NFL model: projected totals are shifted by the recency-weighted "
+                   "median of (model total − market total) over all FBS-vs-FBS games before the prediction week. "
+                   "Shown with and without it. Spreads are unchanged.")
+
+
+def section(title, summary, sens, before, seasons, scope, close_src, calib):
     a = summary["accuracy"]
-    L = []
-    L.append("# Backtest results\n")
-    L.append(f"_Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · "
-             f"seasons {config.BACKTEST_SEASONS[0]}–{config.BACKTEST_SEASONS[-1]} (regular season + playoffs) · "
-             f"{summary['n_games']} games_\n")
-    L.append("**How this was run:** walk-forward. Before each week, ratings were refit using only games played in "
-             "earlier weeks. Picks are graded against nflverse **closing** lines at standard -110 pricing "
-             "(break-even 52.4%). Model parameters were set before the backtest was run and were not tuned to it.\n")
-    for mkt, title in (("spread", "Against the spread"), ("total", "Totals (over/under)")):
-        L.append(f"## {title}\n")
-        L.append("| Edge tier | Record | Win % | Units (-110) | p-value vs 52.4% |")
-        L.append("|---|---|---|---|---|")
-        for k, r in summary[mkt].items():
-            L.append(f"| {k} | " + " | ".join(_fmt(r)) + " |")
+    L = [f"# {title}\n",
+         f"_Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · seasons {seasons[0]}–{seasons[-1]} "
+         f"({scope}) · {summary['n_games']} games_\n",
+         "**How this was run:** walk-forward. Before each week, ratings were refit using only games played in "
+         f"earlier weeks. Picks are graded against {close_src} **closing** lines at standard -110 pricing "
+         "(break-even 52.4%). Model parameters were set before the backtest was run and were not tuned to it.\n"]
+    for mkt, t in (("spread", "Against the spread"), ("total", "Totals (over/under)")):
+        L += [f"## {t}\n", "| Edge tier | Record | Win % | Units (-110) | p-value vs 52.4% |", "|---|---|---|---|---|"]
+        L += [f"| {k} | " + " | ".join(_fmt(r)) + " |" for k, r in summary[mkt].items()]
         L.append("")
-    L.append("## By season\n")
-    L.append("| Season | ATS | ATS % | Totals | Totals % |")
-    L.append("|---|---|---|---|---|")
-    for s, d in summary["by_season"].items():
-        L.append(f"| {s} | {d['spread']['label']} | {d['spread']['pct']:.1%} | {d['total']['label']} | {d['total']['pct']:.1%} |")
-    L.append("")
-    L.append("## Accuracy vs the market\n")
-    L.append("| | Model | Closing line |")
-    L.append("|---|---|---|")
-    L.append(f"| Mean abs. error, margin (pts) | {a['model_margin_mae']:.2f} | {a['market_margin_mae']:.2f} |")
-    L.append(f"| Mean abs. error, total (pts) | {a['model_total_mae']:.2f} | {a['market_total_mae']:.2f} |")
-    L.append(f"\nCalibration slope (actual margin on model margin): {a['margin_slope']:.2f} "
-             f"(1.0 = perfectly scaled; >1 means the model is too conservative). "
-             f"Correlation of model margin with closing-line margin: {a['model_vs_market_corr']:.2f}.\n")
+    L += ["## By season\n", "| Season | ATS | ATS % | Totals | Totals % |", "|---|---|---|---|---|"]
+    for ss, d in summary["by_season"].items():
+        L.append(f"| {ss} | {d['spread']['label']} | {d['spread']['pct']:.1%} | {d['total']['label']} | {d['total']['pct']:.1%} |")
+    L += ["", "## Accuracy vs the market\n", "| | Model | Closing line |", "|---|---|---|",
+          f"| Mean abs. error, margin (pts) | {a['model_margin_mae']:.2f} | {a['market_margin_mae']:.2f} |",
+          f"| Mean abs. error, total (pts) | {a['model_total_mae']:.2f} | {a['market_total_mae']:.2f} |",
+          f"\nCalibration slope (actual margin on model margin): {a['margin_slope']:.2f} "
+          f"(1.0 = perfectly scaled; >1 means the model is too conservative). "
+          f"Correlation of model margin with closing-line margin: {a['model_vs_market_corr']:.2f}.\n"]
     if before is not None:
-        L.extend(_before_after(before, summary))
-    L.append("## Parameter sensitivity (not used to choose parameters)\n")
-    L.append("Each row changes one parameter from the default and reruns the whole backtest. "
-             "If results swing a lot between rows, any single row's record is mostly noise.\n")
-    L.append("| Variant | ATS | ATS % | ATS 3.5+ | Totals | Totals % | Totals 3.5+ |")
-    L.append("|---|---|---|---|---|---|---|")
-    for name, s in sens:
-        sp, to = s["spread"], s["total"]
+        L += _before_after(before, summary, *calib)
+    L += ["## Parameter sensitivity (not used to choose parameters)\n",
+          "Each row changes one parameter from the default and reruns the whole backtest. "
+          "If results swing a lot between rows, any single row's record is mostly noise.\n",
+          "| Variant | ATS | ATS % | ATS 3.5+ | Totals | Totals % | Totals 3.5+ |", "|---|---|---|---|---|---|---|"]
+    for name, sm in sens:
+        sp, to = sm["spread"], sm["total"]
         L.append(f"| {name} | {sp['All']['label']} | {sp['All']['pct']:.1%} | {sp['3.5+']['label']} "
                  f"| {to['All']['label']} | {to['All']['pct']:.1%} | {to['3.5+']['label']} |")
-    L.append("")
-    L.append("## Reading this honestly\n")
-    L.extend(_honest_notes(summary))
-    Path(path).write_text("\n".join(L) + "\n")
+    L += ["", "## Reading this honestly\n"] + _honest_notes(summary)
+    return "\n".join(L) + "\n"
 
 
 def _honest_notes(summary):
@@ -187,31 +190,76 @@ def _honest_notes(summary):
     return notes
 
 
-def main(schedules=None, team_games=None, sensitivity=True):
-    schedules = schedules if schedules is not None else data.load_schedules(refresh=False)
-    team_games = team_games if team_games is not None else data.load_team_games(schedules, refresh_current=False)
+NCAAF_SENSITIVITY = [
+    {"HALF_LIFE_WEEKS": 4.0}, {"HALF_LIFE_WEEKS": 10.0},
+    {"PRIOR_REGRESSION": 0.35}, {"PRIOR_REGRESSION": 0.65},
+    {"PRIOR_PLAYS": 150.0}, {"PRIOR_PLAYS": 600.0},
+]
+
+
+def _payload(summary, before, seasons):
+    return {**summary, "v1_0": before, "by_season": {str(k): v for k, v in summary["by_season"].items()},
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "seasons": seasons}
+
+
+def run_nfl(sensitivity=True):
+    schedules = data.load_schedules(refresh=False)
+    team_games = data.load_team_games(schedules, refresh_current=False)
     bt = run(schedules, team_games)
     summary = summarize(bt)
     with _override(TOTALS_CALIBRATION=False, NEUTRAL_RULE="nflverse"):
         before = summarize(run(schedules, team_games))
-    sens = []
+    sens = [("**default**", summary)]
     if sensitivity:
-        sens.append(("**default**", summary))
         for ov in SENSITIVITY:
             with _override(**ov):
-                s = summarize(run(schedules, team_games))
-            sens.append((", ".join(f"{k}={v:g}" for k, v in ov.items()), s))
-    (ROOT / "data").mkdir(exist_ok=True)
+                sens.append((", ".join(f"{k}={v:g}" for k, v in ov.items()), summarize(run(schedules, team_games))))
     bt.to_csv(ROOT / "data" / "backtest_games.csv", index=False)
-    write_report(summary, sens, ROOT / "backtest_results.md", before=before)
+    md = section("NFL backtest", summary, sens, before, config.BACKTEST_SEASONS, "regular season + playoffs",
+                 "nflverse", ("Totals calibration: v1.0 → v1.1", NFL_CALIB_WHY, ("v1.0", "v1.1")))
+    return md, _payload(summary, before, config.BACKTEST_SEASONS)
+
+
+def run_ncaaf(sensitivity=True):
+    from nfledge import cfb_data
+    from nfledge.sports import BY_KEY
+    sport = BY_KEY["ncaaf"]
+    sched = cfb_data.load_schedules(refresh=False)
+    tg = cfb_data.load_team_games(sched, refresh=False)
+    groups = cfb_data.groups_by_season(sched)
+    base = sport.params()
+    bt = run(sched, tg, sport=sport, params=base, groups=groups)
+    summary = summarize(bt)
+    before = summarize(run(sched, tg, sport=sport, params={**base, "TOTALS_CALIBRATION": False}, groups=groups))
+    sens = [("**default**", summary)]
+    if sensitivity:
+        for ov in NCAAF_SENSITIVITY:
+            sm = summarize(run(sched, tg, sport=sport, params={**base, **ov}, groups=groups))
+            sens.append((", ".join(f"{k}={v:g}" for k, v in ov.items()), sm))
+    bt.to_csv(ROOT / "data" / "backtest_games_ncaaf.csv", index=False)
+    md = section("NCAAF backtest", summary, sens, before, config.NCAAF_BACKTEST_SEASONS,
+                 "FBS vs FBS, regular season + bowls, games with a market line", "CFBD consensus",
+                 ("Totals calibration: off → on", NCAAF_CALIB_WHY, ("uncalibrated", "calibrated")))
+    return md, _payload(summary, before, config.NCAAF_BACKTEST_SEASONS)
+
+
+def main(only=None, sensitivity=True):
+    (ROOT / "data").mkdir(exist_ok=True)
     (ROOT / "results").mkdir(exist_ok=True)
-    payload = {**summary, "v1_0": before, "by_season": {str(k): v for k, v in summary["by_season"].items()},
-               "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-               "seasons": config.BACKTEST_SEASONS}
-    (ROOT / "results" / "backtest_summary.json").write_text(json.dumps(payload, indent=1))
-    return summary
+    out = {}
+    for key, fn in (("nfl", run_nfl), ("ncaaf", run_ncaaf)):
+        if only and key != only:
+            continue
+        md, payload = fn(sensitivity)
+        (ROOT / "results" / f"backtest_{key}.md").write_text(md)
+        (ROOT / "results" / f"backtest_summary_{key}.json").write_text(json.dumps(payload, indent=1))
+        out[key] = payload
+    parts = [(ROOT / "results" / f"backtest_{k}.md") for k in ("nfl", "ncaaf")]
+    (ROOT / "backtest_results.md").write_text("\n".join(p.read_text() for p in parts if p.exists()))
+    return out
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(only=sys.argv[1] if len(sys.argv) > 1 else None)
     print((ROOT / "backtest_results.md").read_text())

@@ -242,8 +242,8 @@
   "market_margin_mae": 9.535996488147498,
   "model_total_mae": 10.472887274305242,
   "market_total_mae": 10.18920105355575,
-  "margin_slope": 1.4292689665881513,
-  "model_vs_market_corr": 0.8299098614858811
+  "margin_slope": 1.4292689665881508,
+  "model_vs_market_corr": 0.8299098614858812
  },
  "n_games": 1139,
  "over_share": 0.5039508340649693,
@@ -492,14 +492,14 @@
    "market_margin_mae": 9.535996488147498,
    "model_total_mae": 10.518900616040916,
    "market_total_mae": 10.18920105355575,
-   "margin_slope": 1.4292689665881513,
+   "margin_slope": 1.4292689665881508,
    "model_vs_market_corr": 0.8299098614858812
   },
   "n_games": 1139,
   "over_share": 0.607550482879719,
-  "model_minus_market_total_median": 0.6975971654742352
+  "model_minus_market_total_median": 0.6975971654742281
  },
- "generated_at": "2026-10-07T14:34:36Z",
+ "generated_at": "2026-10-07T15:08:58Z",
  "seasons": [
   2022,
   2023,

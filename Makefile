@@ -13,11 +13,11 @@ update:           ## refresh data, capture lines, lock picks, regrade, rebuild s
 build:            ## rebuild ./site from the ledger without refreshing data
 	$(PY) -m nfledge.pipeline build
 
-backtest:         ## walk-forward backtest -> backtest_results.md
-	$(PY) -m nfledge.pipeline backtest
+backtest:         ## walk-forward backtests -> backtest_results.md (SPORT=nfl|ncaaf for one)
+	$(PY) -m nfledge.pipeline backtest $(if $(SPORT),--sport $(SPORT),)
 
-sheet:            ## print this week's pick sheet
-	$(PY) -m nfledge.pipeline sheet
+sheet:            ## print this week's pick sheets (SPORT=nfl|ncaaf for one)
+	$(PY) -m nfledge.pipeline sheet $(if $(SPORT),--sport $(SPORT),)
 
 deploy:           ## push ./site to Cloudflare Pages
 	./deploy.sh
