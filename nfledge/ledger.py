@@ -36,8 +36,6 @@ FILES = {
 
 
 class Ledger:
-    preview = False
-
     def __init__(self, root: Path, public_prefix: str):
         self.root = Path(root)
         self.ratings_dir = self.root / "ratings"
@@ -94,27 +92,8 @@ class Ledger:
         return sorted(self.root.glob("*.csv"))
 
 
-class PreviewLedger(Ledger):
-    """Picks made while a model is in preview. Line snapshots and frozen lines still go to the public
-    ledger (they are the record of what was frozen, when); picks, ratings, closing lines and grades go
-    to data/preview and are never published or committed."""
-    preview = True
-    SHARED = {"line_snapshots", "frozen_lines"}
-
-    def __init__(self, public: Ledger, root: Path):
-        super().__init__(root, public.public_prefix)
-        self.public = public
-
-    def path(self, name):
-        return self.public.path(name) if name in self.SHARED else super().path(name)
-
-    def public_files(self):
-        return self.public.public_files()
-
-
 NFL = Ledger(ROOT / "ledger", "ledger/")
 NCAAF = Ledger(ROOT / "ledger" / "ncaaf", "ledger/ncaaf/")
-NCAAF_PREVIEW = PreviewLedger(NCAAF, ROOT / "data" / "preview" / "ncaaf")
 
 # Backwards-compatible module-level API (NFL).
 LEDGER, RATINGS = NFL.root, NFL.ratings_dir

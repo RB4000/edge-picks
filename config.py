@@ -81,17 +81,14 @@ NCAAF_MODEL = {
     "VERSION": "cfb-epa-ridge-1.1",
 }
 NCAAF_ODDS_API_SPORT = "americanfootball_ncaaf"
-NCAAF_FREEZE_POLICY_FROM = (2026, 7)   # week 6 (launch week) froze at first capture on 10/7
-# Preview: picks are computed and shown, labelled, but written to data/preview (never the public ledger).
-NCAAF_PREVIEW = True
-NCAAF_PREVIEW_LABEL = "PREVIEW — model calibration in progress, picks not yet counted"
-# Games kicking off before this date (ET) are never picked, previewed or graded (week 6 Wed-Fri).
-NCAAF_COVERAGE_START_ET = "2026-10-10"
-# The public NCAAF record starts with this (season, week); nothing earlier is ever written to the ledger.
-# Week 6 Saturday was previewed only (model v1.1 still in calibration).
-NCAAF_COVERAGE_FROM = (2026, 7)
-NCAAF_COVERAGE_NOTE = ("NCAAF coverage starts with Week 7 of 2026, the first week under the Tuesday 7am CT line freeze. "
-                       "Week 6 was shown as an uncounted preview while the college model was recalibrated.")
+NCAAF_FREEZE_POLICY_FROM = (2026, 7)
+# College is projections-only: tested against closing lines, the model does not beat them (fitted market-blend
+# weight on spreads ~0; see backtest_results.md). No NCAAF picks are made, counted or graded, and no NCAAF
+# lines are captured. Weekly ratings snapshots are still written to ledger/ncaaf/ratings.
+NCAAF_PROJECTIONS_ONLY = True
+NCAAF_PROJECTIONS_NOTE = ("College football: projections only. We tested this model against the betting market and it "
+                          "does not beat closing prices, so we publish projected scores, model lines and ratings, "
+                          "but we don't make or count college picks.")
 # Odds API team name -> CFBD school, for names that don't match "School Mascot" after normalising.
 NCAAF_NAME_ALIASES = {
     "Hawaii Rainbow Warriors": "Hawai'i",

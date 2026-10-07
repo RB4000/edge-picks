@@ -96,16 +96,9 @@ def capture_lines(sport, sched, week, now):
 
 # --- locking ----------------------------------------------------------------------------
 
-def lock_picks(sport, sched, tg, groups, week, now):
+def ensure_ratings(sport, sched, tg, groups, week, now):
+    """The week's ratings snapshot, fit once (when earlier games are in) and never refit."""
     led = sport.ledger
-    start = getattr(sport, "coverage_from", None)
-    if start and (sport.season, week) < start and not led.preview:
-        log(f"  {sport.key} picks: week {week} is before public coverage starts (week {start[1]}); not locking")
-        return
-    ok, why = sport.ready_to_lock(sched, tg, week, now)
-    if not ok:
-        log(f"  {sport.key} picks: not locking yet — {why}")
-        return
     snap = led.read_ratings(sport.season, week)
     if snap is None:
         fit = sport.engine(tg, sched, groups).as_of(sport.season, week)
@@ -117,6 +110,16 @@ def lock_picks(sport, sched, tg, groups, week, now):
         }, sport.params())
         p = led.write_ratings_once(sport.season, week, snap)
         log(f"  {sport.key} ratings: wrote {p.name}")
+    return snap
+
+
+def lock_picks(sport, sched, tg, groups, week, now):
+    led = sport.ledger
+    ok, why = sport.ready_to_lock(sched, tg, week, now)
+    if not ok:
+        log(f"  {sport.key} picks: not locking yet — {why}")
+        return
+    snap = ensure_ratings(sport, sched, tg, groups, week, now)
     fit = ratings.fit_from_dict(snap)
     idx = fit.idx
     frozen = led.read("frozen_lines").set_index("game_id")
@@ -209,6 +212,15 @@ def run_sport(sport, now, refresh=True):
     log(f"{sport.label}: refreshing schedules + play-by-play")
     sched, tg, groups = sport.load(refresh=refresh)
     week = sport.current_week(sched, now)
+    if sport.projections_only:
+        if week is not None:
+            ok, why = sport.ready_to_lock(sched, tg, week, now)
+            if ok:
+                ensure_ratings(sport, sched, tg, groups, week, now)
+            else:
+                log(f"  {sport.key} ratings: not fitting week {week} yet — {why}")
+        log(f"{sport.label}: projections only (no lines captured, no picks, no grading)")
+        return {"sport": sport, "sched": sched, "graded": pd.DataFrame(), "week": week}
     if week is None:
         log(f"{sport.label}: {sport.season} season complete; regrading only")
     else:
@@ -257,7 +269,8 @@ def load_results(refresh=False):
     out = []
     for sport in SPORTS:
         sched, _, _ = sport.load(refresh=refresh)
-        out.append({"sport": sport, "sched": sched, "graded": graded(sport, sched),
+        out.append({"sport": sport, "sched": sched,
+                    "graded": pd.DataFrame() if sport.projections_only else graded(sport, sched),
                     "week": sport.current_week(sched, now)})
     return out
 
@@ -282,7 +295,9 @@ def main(argv=None):
     if a.cmd == "sheet":
         from nfledge import sheet
         for r in load_results():
-            if not a.sport or r["sport"].key == a.sport:
+            if r["sport"].projections_only:
+                print(f"\n{r['sport'].label}: projections only, no pick sheet")
+            elif not a.sport or r["sport"].key == a.sport:
                 sheet.print_sheet(r["sport"], r["sched"], r["week"])
         return 0
 

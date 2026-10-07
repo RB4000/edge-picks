@@ -36,6 +36,13 @@
   <p class="lede">One model structure for both the NFL and college football, written down in advance and run the same way every week. No hand-entered picks, no edited lines.</p>
 </section>
 
+<section class="panel prose" id="college">
+  <h2>Why college is projections only</h2>
+  <p>We tested the college model against the betting market and it does not beat closing prices. Over 3,174 FBS games from 2022 to 2025, run walk-forward, its spread picks went 48.9% against the closing line and its totals 51.8%. Both are below the 52.4% needed to break even at standard odds.</p>
+  <p>We also asked a more direct question: if you blend the model's line with the market's, how much weight does the model deserve? Fit on actual results, the answer for spreads was zero (every season between −0.06 and +0.05). For totals it was about 0.15, too small to produce a meaningful edge. The market already knows what the model knows, and more.</p>
+  <p>So for college football we publish projected scores, model lines and opponent-adjusted ratings, updated weekly, because they are a useful picture of how teams play. We do not make, count or grade college picks. The market consensus appears next to each projection for context only. A gap between the two is not an edge.</p>
+</section>
+
 <section class="panel prose">
   <h2>1. Efficiency: opponent-adjusted EPA per play</h2>
   <p>Every snap carries an <em>expected points added</em> (EPA) value: how much the play changed the offense's expected points. NFL values come from nflverse. College values come from CollegeFootballData's play-by-play ("PPA"). We average EPA per team per game and drop garbage time. In the NFL that means 4th-quarter snaps with win probability outside {{ (cfg.GARBAGE_WP[0]*100)|int }}–{{ (cfg.GARBAGE_WP[1]*100)|int }}%. In college it means snaps where the margin exceeds 43, 37, 27 or 22 points in quarters 1–4.</p>
@@ -55,11 +62,11 @@
   <p>Scoring skews high: a few shootouts pull the average game above the typical one. The model projects averages, while market totals sit near the typical (median) game, so an uncalibrated model leans over. Each week, projected totals are shifted by the median gap between model and market totals across every earlier game.</p>
   <h2>5b. College scale calibration</h2>
   <p>College model v1.0 produced spreads that were far too compressed: its margins varied about 40% as much as the market's. v1.1 multiplies each projected team-strength margin by the slope of actual margins on model margins over every earlier game (home field removed), and applies the same correction to totals before the median-gap step. This calibration is fit on game results, never on market lines. Before/after numbers are in the backtest report.</p>
-  <h2>6. Picks</h2>
-  <p>Model spread and total are compared with the market line. The difference is the edge, and the pick is whichever side the model prefers. Edges are grouped into tiers: under 2 points, 2–3.5, and 3.5+. College picks are published only for FBS-vs-FBS games with a market line.</p>
+  <h2>6. Picks (NFL only)</h2>
+  <p>Model spread and total are compared with the market line. The difference is the edge, and the pick is whichever side the model prefers. Edges are grouped into tiers: under 2 points, 2–3.5, and 3.5+. College games get projections only (see above).</p>
   <h2>7. The rules</h2>
   <ul>
-    <li>Each game's line is frozen at the first capture on or after 7:00 AM CT on Tuesday of game week. Picks are graded against it, never against a later number. NFL Week 5 of 2026, the launch week, froze at first capture on Wednesday 10/7; those rows are labeled on the record page. {{ cfg.NCAAF_COVERAGE_NOTE }}</li>
+    <li>Each game's line is frozen at the first capture on or after 7:00 AM CT on Tuesday of game week. Picks are graded against it, never against a later number. NFL Week 5 of 2026, the launch week, froze at first capture on Wednesday 10/7; those rows are labeled on the record page.</li>
     <li>A pick is generated and locked once, before kickoff, after earlier games' play-by-play is in. It is never revised.</li>
     <li>The ratings used for each week are published as a file next to the picks.</li>
     <li>Every pick is also graded against the closing line, and closing line value is reported, so you can see whether the model beat the number or just got lucky.</li>
@@ -77,7 +84,7 @@
 {% endif %}
 {% if bts.ncaaf %}
 <section class="panel">
-  <h2>NCAAF backtest, {{ bts.ncaaf.seasons[0] }}–{{ bts.ncaaf.seasons[-1] }}</h2>
+  <h2>NCAAF backtest, {{ bts.ncaaf.seasons[0] }}–{{ bts.ncaaf.seasons[-1] }} (why college has no picks)</h2>
   {{ bt_tables(bts.ncaaf, 'CFBD consensus') }}
 </section>
 {% endif %}

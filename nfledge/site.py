@@ -104,9 +104,8 @@ class SportView:
         self.article = "the " if sport.key == "nfl" else ""
         self.ledger_prefix = sport.ledger.public_prefix
         self.freeze_week = sport.freeze_policy_from[1]
-        self.preview = sport.ledger.preview
-        self.preview_label = config.NCAAF_PREVIEW_LABEL if self.preview else ""
-        self.coverage_note = config.NCAAF_COVERAGE_NOTE if sport.key == "ncaaf" else ""
+        self.projections_only = sport.projections_only
+        self.projections_note = config.NCAAF_PROJECTIONS_NOTE if self.projections_only else ""
 
     def name(self, t):
         return self.s.name(t)
@@ -165,7 +164,8 @@ def game_views(sched, graded, season, week, now, pickable_only=True):
             "stadium": g.get("stadium"), "final": bool(g.final),
             "away_score": None if pd.isna(g.away_score) else int(g.away_score),
             "home_score": None if pd.isna(g.home_score) else int(g.home_score),
-            "pick": None,
+            "mkt_home_spread": g.get("mkt_home_spread"), "mkt_total": g.get("mkt_total"),
+            "pick": None, "proj": None,
         }
         if g.game_id in gi.index:
             p = gi.loc[g.game_id].to_dict()
@@ -184,6 +184,22 @@ def game_views(sched, graded, season, week, now, pickable_only=True):
             days.append({"key": g["day_key"], "label": g["day_label"], "games": []})
         days[-1]["games"].append(g)
     return games, days
+
+
+def add_projections(games, snap):
+    """Projections-only sports: attach the model's projection from the week's ratings snapshot,
+    plus the current market consensus for context (not a pick, not graded)."""
+    fit = ratings.fit_from_dict(snap) if snap else None
+    for g in games:
+        g["status"] = "projection" if fit is not None else "pending"
+        if fit is None or g["home"] not in fit.idx or g["away"] not in fit.idx:
+            g["status"] = "pending"
+            continue
+        pr = ratings.project(fit, g["home"], g["away"], g["neutral"])
+        g["proj"] = {"away_pts": pr["away_pts"], "home_pts": pr["home_pts"],
+                     "home_spread": pr["model_home_spread"], "total": pr["total"],
+                     "mkt_home_spread": g.get("mkt_home_spread"), "mkt_total": g.get("mkt_total")}
+    return games
 
 
 def explain(fit, g, snap, sv, rank_pool):
@@ -283,6 +299,8 @@ def build_sport(e, tmp, res, now):
     (base / "week").mkdir()
 
     weeks_with_picks = sorted(set(graded["week"].astype(int))) if len(graded) else []
+    if sv.projections_only:  # weeks with a published ratings snapshot
+        weeks_with_picks = sorted(int(p.stem.split("_w")[1]) for p in sport.ledger.ratings_dir.glob(f"{season}_w*.json"))
     if week is None:
         week = max(weeks_with_picks) if weeks_with_picks else int(sched[sched.season == season]["week"].max())
     all_weeks = sorted(set(weeks_with_picks) | {week})
@@ -295,6 +313,8 @@ def build_sport(e, tmp, res, now):
     for w in all_weeks:
         games, days = game_views(sched, graded, season, w, now)
         snap = sport.ledger.read_ratings(season, w)
+        if sv.projections_only:
+            add_projections(games, snap)
         ctx = dict(sp=sv, season=season, week=w, days=days, games=games, snap=snap,
                    n_locked=sum(g["status"] == "locked" for g in games))
         (base / "week" / f"{season}-{w:02d}.html").write_text(
@@ -310,16 +330,15 @@ def build_sport(e, tmp, res, now):
             (base / "game" / f"{g['id']}.html").write_text(e.get_template("game.html").render(
                 sp=sv, g=g, ex=ex, snap=snap, season=season, week=w, root="../../", sroot="../", page="game"))
 
-    # preview picks are shown on week/game pages but are not part of any record
-    counted = _empty_graded() if sv.preview else graded
-    rows = counted[counted["season"] == season].sort_values(["week", "kickoff_utc"], ascending=[False, True]) \
-        if len(counted) else counted
-    rows = rows.to_dict("records")
-    notes = pre_policy_notes(rows, sport)
-    rec = records(counted, season)
-    (base / "record.html").write_text(e.get_template("record.html").render(
-        sp=sv, rec=rec, rows=rows, season=season, root="../", sroot="", page="record", pre_notes=notes))
-    return {"sv": sv, "week": week, "current": current, "rec": rec, "graded": counted}
+    rec = records(graded, season)
+    if not sv.projections_only:  # projections-only sports have no record page
+        rows = graded[graded["season"] == season].sort_values(["week", "kickoff_utc"], ascending=[False, True]) \
+            if len(graded) else graded
+        rows = rows.to_dict("records")
+        notes = pre_policy_notes(rows, sport)
+        (base / "record.html").write_text(e.get_template("record.html").render(
+            sp=sv, rec=rec, rows=rows, season=season, root="../", sroot="", page="record", pre_notes=notes))
+    return {"sv": sv, "week": week, "current": current, "rec": rec, "graded": graded}
 
 
 def build_all(results):
@@ -362,7 +381,7 @@ def build_all(results):
         dest.mkdir(parents=True, exist_ok=True)
         for f in led.public_files():
             shutil.copy(f, dest / f.name)
-        if led.ratings_dir.exists() and not led.preview:
+        if led.ratings_dir.exists():
             shutil.copytree(led.ratings_dir, dest / "ratings")
     (tmp / "ledger").mkdir(exist_ok=True)
     if (ROOT / "backtest_results.md").exists():
@@ -371,7 +390,8 @@ def build_all(results):
                                   "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n")
     # pre-NCAAF NFL URLs keep working
     (tmp / "_redirects").write_text("/game/* /nfl/game/:splat 301\n/week/* /nfl/week/:splat 301\n"
-                                    "/record.html /nfl/record.html 301\n")
+                                    "/record.html /nfl/record.html 301\n/ncaaf/record.html /ncaaf/ 302\n"
+                                    "/ncaaf/record /ncaaf/ 302\n")
     (tmp / "404.html").write_text(e.get_template("404.html").render(root="/", page="404"))
 
     if OUT.exists():

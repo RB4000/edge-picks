@@ -90,7 +90,8 @@ def load_schedules(refresh=True):
         frames.append(out)
     s = pd.concat(frames, ignore_index=True)
     s["final"] = s["completed"] & s["home_score"].notna() & s["away_score"].notna()
-    # Lines CFBD lists for games not yet played are not closing lines.
+    # Lines CFBD lists for games not yet played are not closing lines; keep them only as market context.
+    s["mkt_home_spread"], s["mkt_total"] = s["close_home_spread"], s["close_total"]
     s.loc[~s["final"], ["close_home_spread", "close_total"]] = np.nan
     s["neutral_nflverse"] = s["neutral"]  # same column name the site uses for "neutral rule at lock time"
     s["international"] = False

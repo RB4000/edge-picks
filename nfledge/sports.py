@@ -16,6 +16,7 @@ class Sport:
     key = label = ""
     season = 0
     freeze_policy_from = (0, 0)
+    projections_only = False   # True: ratings + projections are published, no picks are made or graded
     launch_note_tpl = ("Week {week} lines were captured {days}, the day {label} picks launched. By then the market "
                        "had already moved off its Tuesday numbers, so these are not opening or Tuesday-morning lines.")
 
@@ -100,8 +101,8 @@ class NCAAF(Sport):
     key, label = "ncaaf", "NCAAF"
     season = config.NCAAF_CURRENT_SEASON
     freeze_policy_from = config.NCAAF_FREEZE_POLICY_FROM
-    coverage_from = config.NCAAF_COVERAGE_FROM
-    ledger = ledger.NCAAF_PREVIEW if config.NCAAF_PREVIEW else ledger.NCAAF
+    ledger = ledger.NCAAF
+    projections_only = config.NCAAF_PROJECTIONS_ONLY
 
     def params(self):
         return ratings.ncaaf_params()
@@ -114,8 +115,6 @@ class NCAAF(Sport):
     def load(self, refresh=True):
         from nfledge import cfb_data
         s = cfb_data.load_schedules(refresh=refresh)
-        start = pd.Timestamp(config.NCAAF_COVERAGE_START_ET, tz=ET).tz_convert("UTC")
-        s.loc[(s["season"] == self.season) & (s["kickoff_utc"] < start), "pickable"] = False
         tg = cfb_data.load_team_games(s, refresh=refresh)
         return s, tg, cfb_data.groups_by_season(s)
 

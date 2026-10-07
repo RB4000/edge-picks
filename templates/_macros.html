@@ -16,12 +16,39 @@
 <span class="edgebar {{ slug }}" style="--e: {{ [edge / 7.0, 1.0]|min }}" aria-hidden="true"><span></span></span>
 {%- endmacro %}
 
+{% macro proj_card(g, sroot) -%}
+{% set q = g.proj %}
+<article class="card status-{{ g.status }}">
+  <header class="card-head">
+    <span class="kick">{{ g.time_label }}{% if g.neutral %} · neutral site{% endif %}</span>
+  </header>
+  <div class="matchup">
+    {{ team_line(g.away, g.away_rec, g.away_score, q.away_pts if q else none, g.final, g.final and g.away_score > g.home_score) }}
+    {{ team_line(g.home, g.home_rec, g.home_score, q.home_pts if q else none, g.final, g.final and g.home_score > g.away_score) }}
+    {% if q %}<div class="proj-label">{% if g.final %}final · {% endif %}model proj.</div>{% endif %}
+  </div>
+  {% if q %}
+  <table class="lines">
+    <thead><tr><th></th><th>Model</th><th>Market</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Spread</th><td class="num">{{ sp.abbr(g.home) }} {{ q.home_spread|line }}</td><td class="num muted">{{ sp.abbr(g.home) ~ ' ' ~ (q.mkt_home_spread|line) if q.mkt_home_spread == q.mkt_home_spread and q.mkt_home_spread is not none else '—' }}</td></tr>
+      <tr><th scope="row">Total</th><td class="num">{{ q.total|num }}</td><td class="num muted">{{ q.mkt_total|num }}</td></tr>
+    </tbody>
+  </table>
+  {% else %}
+  <p class="note">Projection appears once this week's ratings are fit.</p>
+  {% endif %}
+  <a class="card-link" href="{{ sroot }}game/{{ g.id }}.html">Breakdown <span aria-hidden="true">→</span></a>
+</article>
+{%- endmacro %}
+
 {% macro game_card(g, sroot) -%}
+{% if sp.projections_only %}{{ proj_card(g, sroot) }}{% else %}
 {% set p = g.pick %}
 <article class="card status-{{ g.status }}">
   <header class="card-head">
     <span class="kick">{{ g.time_label }}{% if g.neutral %} · {{ 'international · ' if g.international else '' }}neutral site{% endif %}</span>
-    {% if g.status == 'locked' %}{% if sp.preview %}<span class="lock">Preview · not counted</span>{% else %}<span class="lock" title="Pick locked {{ p.locked_at|ts }} against the line {{ p.line_fetched_at|captured }}">Locked {{ p.locked_at|ts }}</span>{% endif %}{% endif %}
+    {% if g.status == 'locked' %}<span class="lock" title="Pick locked {{ p.locked_at|ts }} against the line {{ p.line_fetched_at|captured }}">Locked {{ p.locked_at|ts }}</span>{% endif %}
   </header>
   <div class="matchup">
     {% if p %}
@@ -70,6 +97,7 @@
   {% endif %}
   <a class="card-link" href="{{ sroot }}game/{{ g.id }}.html">Breakdown <span aria-hidden="true">→</span></a>
 </article>
+{% endif %}
 {%- endmacro %}
 
 {% macro rec_cell(r) -%}
