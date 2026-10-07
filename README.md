@@ -1,6 +1,6 @@
 # BRAND_NAME — NFL + college football spread & totals model
 
-An opponent-adjusted EPA model that projects every NFL and FBS college game's score, compares it to the market, and publishes the picks with a locked, timestamped line. A static site shows each week's card, per-game breakdowns, and a season record graded automatically from final scores.
+An opponent-adjusted EPA model that projects every NFL and FBS college game's score. NFL picks are published against a locked, timestamped line; college games get projections only. A static site shows each week's card, per-game breakdowns, and a season record graded automatically from final scores.
 
 > Rename the brand in one place: `BRAND_NAME` in [`config.py`](config.py). The disclaimer text lives there too.
 
@@ -49,7 +49,7 @@ Injuries, QB changes, weather, travel, motivation — except as they've already 
 
 Before each week, ratings were refit using only earlier games. Picks were graded against **closing** lines at −110 (break-even 52.4%). Parameters were set before the backtest and **not tuned to it**. Full report with confidence intervals and a parameter-sensitivity table: [`backtest_results.md`](backtest_results.md).
 
-Headline, NFL (v1.1): **ATS 547-563-29 (49.3%), totals 554-575-10 (49.1%)**. NCAAF (v1.0, FBS vs FBS): **ATS 1557-1551-66 (50.1%), totals 1627-1502-45 (52.0%)**. Neither beats closing lines at −110 (break-even 52.4%). The college model's spreads are badly compressed: projected margins have about 40% of the market's spread, so most big "edges" are the model taking large underdogs. Read the college numbers with that in mind. These results are published as is.
+Headline, NFL (v1.1): **ATS 547-563-29 (49.3%), totals 554-575-10 (49.1%)** against closing lines. NCAAF (v1.1, FBS vs FBS): **ATS 1519-1589-66 (48.9%), totals 1621-1508-45 (51.8%)**. Neither beats closing lines at −110 (break-even 52.4%), and the market-blend weight fit on results is zero for both models' spreads. So the site is framed as a transparent, timestamped, never-edited record of a public model, not as market-beating picks. College is projections only (no picks). One post-hoc slice, NFL spread disagreements of 7+ points, is tracked forward from Week 6 2026 as a separately tallied experiment (`SPREAD_EXPERIMENT` in `config.py`).
 
 ---
 
@@ -62,10 +62,10 @@ make update     # refresh data → capture/freeze lines → lock picks → regra
 make sheet      # print this week's pick sheet
 make backtest   # rerun both walk-forward backtests → backtest_results.md (add SPORT=nfl|ncaaf for one)
 make serve      # preview at http://localhost:8000
-make deploy     # Cloudflare Pages (asks for a project name the first time)
+make deploy     # Cloudflare (Pages on Workers, via wrangler deploy; asks for a project name the first time)
 ```
 
-`make update` is idempotent and safe on a schedule: it takes a file lock, appends only new ledger rows, and rebuilds the site atomically. See `ops/com.nfledge.update.plist` (launchd, recommended on macOS) and `ops/crontab.example` for a daily 7am CT run. `AUTO_DEPLOY=1` deploys after updating; `LEDGER_AUTOCOMMIT=1` commits ledger changes to git.
+`make update` is idempotent and safe on a schedule: it takes a file lock, appends only new ledger rows, and rebuilds the site atomically. See `ops/com.nfledge.update.plist` (launchd, recommended on macOS) and `ops/crontab.example` for a daily 7am CT run. `AUTO_DEPLOY=1` deploys after updating; `LEDGER_AUTOCOMMIT=1` commits ledger changes to git and pushes them to `origin` (outside timestamps). Replace `/path/to/nfl-edge` in those files with your checkout path; the plist header has a `sed` one-liner that does it.
 
 ### When picks lock
 

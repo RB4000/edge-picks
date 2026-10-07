@@ -5,8 +5,8 @@
   System Settings > General > Date & Time is set to Central. Otherwise change Hour.
   If the Mac is asleep at 7:00, launchd runs the job when it wakes.
 
-  Install:
-    cp ops/com.nfledge.update.plist ~/Library/LaunchAgents/
+  Install (from the repo root; fills in /path/to/nfl-edge with this checkout's absolute path):
+    sed "s|/path/to/nfl-edge|$PWD|g" ops/com.nfledge.update.plist > ~/Library/LaunchAgents/com.nfledge.update.plist
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nfledge.update.plist
   Run now (test):   launchctl kickstart gui/$(id -u)/com.nfledge.update
   Uninstall:        launchctl bootout gui/$(id -u)/com.nfledge.update
@@ -18,11 +18,11 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>cd /Users/rb/projects/nfl-edge &amp;&amp; AUTO_DEPLOY=1 LEDGER_AUTOCOMMIT=1 ./update.sh</string>
+    <string>cd /path/to/nfl-edge &amp;&amp; AUTO_DEPLOY=1 LEDGER_AUTOCOMMIT=1 ./update.sh</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
-  <key>StandardOutPath</key><string>/Users/rb/projects/nfl-edge/data/logs/update.log</string>
-  <key>StandardErrorPath</key><string>/Users/rb/projects/nfl-edge/data/logs/update.log</string>
+  <key>StandardOutPath</key><string>/path/to/nfl-edge/data/logs/update.log</string>
+  <key>StandardErrorPath</key><string>/path/to/nfl-edge/data/logs/update.log</string>
 </dict>
 </plist>

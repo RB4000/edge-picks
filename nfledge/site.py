@@ -269,6 +269,20 @@ def records(graded, season=None):
     return out
 
 
+def experiment(graded, season):
+    """The prospective 7+ point spread tracker: same picks, a separate tally."""
+    ex = config.SPREAD_EXPERIMENT
+    if not len(graded):
+        return {"cfg": ex, "rows": [], "frozen": picks.record([]), "close": picks.record([]), "clv": None}
+    g = graded[(graded["season"] == season) & (graded["week"] >= ex["from"][1]) & (graded["season"] >= ex["from"][0])
+               & (graded["spread_pick"] != "PASS") & (graded["spread_edge"] >= ex["min_edge"])]
+    g = g.sort_values(["week", "kickoff_utc"], ascending=[False, True])
+    clv = g["spread_clv"].dropna()
+    return {"cfg": ex, "rows": g.to_dict("records"), "frozen": picks.record(g["spread_result"]),
+            "close": picks.record(g["spread_result_close"]), "clv": clv.mean() if len(clv) else None,
+            "clv_n": len(clv)}
+
+
 def pre_policy_notes(rows, sport):
     early = {}
     for r in rows:
@@ -337,7 +351,8 @@ def build_sport(e, tmp, res, now):
         rows = rows.to_dict("records")
         notes = pre_policy_notes(rows, sport)
         (base / "record.html").write_text(e.get_template("record.html").render(
-            sp=sv, rec=rec, rows=rows, season=season, root="../", sroot="", page="record", pre_notes=notes))
+            sp=sv, rec=rec, rows=rows, season=season, root="../", sroot="", page="record", pre_notes=notes,
+            exp=experiment(graded, season)))
     return {"sv": sv, "week": week, "current": current, "rec": rec, "graded": graded}
 
 

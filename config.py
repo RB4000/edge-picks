@@ -55,6 +55,18 @@ FREEZE_WEEKDAY = 1            # Monday=0, Tuesday=1
 FREEZE_HOUR = 7
 FREEZE_TZ = "America/Chicago"
 
+# Prospective forward test, declared 2026-10-07 before any Week 6 line froze. In the 2022-2025 backtest,
+# NFL spread picks with a raw model-vs-market disagreement of 7+ points went 35-27-2 (56.5%, 62 decided games). That
+# slice was found after looking at the results, so it is tested forward only, starting Week 6 2026,
+# and tallied separately. It changes no pick: these games are ordinary locked picks in the main record.
+SPREAD_EXPERIMENT = {
+    "name": "7+ point spread disagreements",
+    "min_edge": 7.0,          # raw |model spread - frozen market spread|, as recorded in picks.csv
+    "from": (2026, 6),
+    "declared": "2026-10-07",
+    "backtest": "35-27-2 against closing lines (56.5% of decided games)",
+}
+
 # --- NCAAF ----------------------------------------------------------------------
 # Same model structure; parameters fixed a priori (not tuned on the backtest).
 NCAAF_FIRST_SEASON = 2021

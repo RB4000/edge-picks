@@ -205,3 +205,6 @@ table.data { border-collapse: collapse; width: 100%; font-size: 13px; margin: 6p
 .rk-2 { color: var(--muted); }
 
 .projections-banner { margin-bottom: 8px; }
+.tiles-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 640px) { .tiles-3 { grid-template-columns: 1fr; } }
+.tag-exp { display: inline-block; vertical-align: middle; margin-left: 8px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font: 500 11px/1.4 "IBM Plex Mono", monospace; letter-spacing: .04em; text-transform: uppercase; }

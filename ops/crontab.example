@@ -1,7 +1,8 @@
-# Daily 7:00 AM Central. Install with: crontab -e  (paste one of the lines below)
+# Daily 7:00 AM Central. Install with: crontab -e  (paste one of the lines below, replacing
+# /path/to/nfl-edge with the absolute path of your checkout)
 #
 # macOS cron uses the system time zone (no CRON_TZ). If your Mac is on Central time:
-0 7 * * * cd /Users/rb/projects/nfl-edge && AUTO_DEPLOY=1 LEDGER_AUTOCOMMIT=1 ./update.sh >> data/logs/update.log 2>&1
+0 7 * * * cd /path/to/nfl-edge && AUTO_DEPLOY=1 LEDGER_AUTOCOMMIT=1 ./update.sh >> data/logs/update.log 2>&1
 #
 # Linux (cronie/vixie) supports CRON_TZ, which handles daylight saving correctly:
 # CRON_TZ=America/Chicago
