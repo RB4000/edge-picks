@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Deploy ./site to Cloudflare Pages with wrangler.
-# First run: asks for a project name once, saves it to .cloudflare-project, creates the project.
+# Deploy ./site to Cloudflare with wrangler. Cloudflare Pages now runs on Workers: the site is a
+# static-assets Worker described by wrangler.jsonc (name = project, assets = ./site; _headers and
+# _redirects are honoured). First run: asks for a project name once, saves it to .cloudflare-project.
 # Auth: interactive runs use `wrangler login` (browser). For cron/unattended deploys, export
 #   CLOUDFLARE_API_TOKEN (Pages:Edit permission) and CLOUDFLARE_ACCOUNT_ID.
 set -euo pipefail
@@ -26,11 +27,8 @@ else
   if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
     $WRANGLER whoami >/dev/null 2>&1 || $WRANGLER login
   fi
-  if ! $WRANGLER pages project list 2>/dev/null | grep -qw "$PROJECT"; then
-    $WRANGLER pages project create "$PROJECT" --production-branch main
-  fi
   echo "$PROJECT" > "$CONF"
   echo "Saved project name to $CONF"
 fi
 
-$WRANGLER pages deploy site --project-name "$PROJECT" --branch main --commit-dirty=true
+$WRANGLER deploy --name "$PROJECT"

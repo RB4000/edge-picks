@@ -98,6 +98,10 @@ def capture_lines(sport, sched, week, now):
 
 def lock_picks(sport, sched, tg, groups, week, now):
     led = sport.ledger
+    start = getattr(sport, "coverage_from", None)
+    if start and (sport.season, week) < start and not led.preview:
+        log(f"  {sport.key} picks: week {week} is before public coverage starts (week {start[1]}); not locking")
+        return
     ok, why = sport.ready_to_lock(sched, tg, week, now)
     if not ok:
         log(f"  {sport.key} picks: not locking yet — {why}")

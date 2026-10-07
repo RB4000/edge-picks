@@ -100,6 +100,7 @@ class NCAAF(Sport):
     key, label = "ncaaf", "NCAAF"
     season = config.NCAAF_CURRENT_SEASON
     freeze_policy_from = config.NCAAF_FREEZE_POLICY_FROM
+    coverage_from = config.NCAAF_COVERAGE_FROM
     ledger = ledger.NCAAF_PREVIEW if config.NCAAF_PREVIEW else ledger.NCAAF
 
     def params(self):

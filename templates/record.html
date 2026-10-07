@@ -9,7 +9,7 @@
 </section>
 
 {% if sp.preview %}
-<section class="panel"><p class="note">{{ sp.preview_label }}. No {{ sp.label }} picks have been counted yet, so there is no record to show. Frozen lines are still being published as they are captured: <a href="{{ root }}{{ sp.ledger_prefix }}frozen_lines.csv">frozen_lines.csv</a>.</p></section>
+<section class="panel"><p class="note">{{ sp.preview_label }}. No {{ sp.label }} picks have been counted yet, so there is no record to show. Frozen lines are still being published as they are captured: <a href="{{ root }}{{ sp.ledger_prefix }}frozen_lines.csv">frozen_lines.csv</a>.</p>{% if sp.coverage_note %}<p class="fine">{{ sp.coverage_note }}</p>{% endif %}</section>
 {% else %}
 {% if sp.coverage_note %}<p class="notice">{{ sp.coverage_note }}</p>{% endif %}
 {{ record_tiles(rec) }}
