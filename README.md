@@ -1,8 +1,8 @@
-# BRAND_NAME — NFL + college football spread & totals model
+# Edge Picks — NFL + college football spread & totals model
 
 An opponent-adjusted EPA model that projects every NFL and FBS college game's score. NFL picks are published against a locked, timestamped line; college games get projections only. A static site shows each week's card, per-game breakdowns, and a season record graded automatically from final scores.
 
-> Rename the brand in one place: `BRAND_NAME` in [`config.py`](config.py). The disclaimer text lives there too.
+> The brand name is set in one place: `BRAND_NAME` in [`config.py`](config.py). The disclaimer text lives there too.
 
 ---
 

@@ -1,7 +1,7 @@
 """Single source of configuration. Rename the brand here and every page follows."""
 
 # --- Brand ------------------------------------------------------------------
-BRAND_NAME = "BRAND_NAME"
+BRAND_NAME = "Edge Picks"
 BRAND_TAGLINE = "An opponent-adjusted EPA model. Every pick timestamped, locked, and graded in public."
 SITE_URL = ""  # e.g. "https://example.pages.dev" -- used for canonical/OG tags if set
 DISCLAIMER = (
