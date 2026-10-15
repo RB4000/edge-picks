@@ -67,6 +67,10 @@ make deploy     # Cloudflare (Pages on Workers, via wrangler deploy; asks for a 
 
 `make update` is idempotent and safe on a schedule: it takes a file lock, appends only new ledger rows, and rebuilds the site atomically. See `ops/com.nfledge.update.plist` (launchd, recommended on macOS) and `ops/crontab.example` for a daily 7am CT run. `AUTO_DEPLOY=1` deploys after updating; `LEDGER_AUTOCOMMIT=1` commits ledger changes to git and pushes them to `origin` (outside timestamps). Replace `/path/to/nfl-edge` in those files with your checkout path; the plist header has a `sed` one-liner that does it.
 
+**Recommended on macOS: `./ops/install-daemon.sh`.** It installs the job as a system LaunchDaemon (`ops/com.nfledge.update.daemon.plist`), so it runs even when the Mac is sitting at the login window after a restart. It also sets up a write-access deploy key for git push, since a daemon can't read the login keychain, and does a test run. Every successful run deploys `/status.json` (a heartbeat). `.github/workflows/watchdog.yml` checks it daily at 14:30 UTC and fails, which emails you, if the last successful update is more than 26 hours old or the ledger push failed. To check by hand any morning:
+
+    grep -q "=== update $(date +%F) 07:0" data/logs/update.log && ! sed -n "/=== update $(date +%F) 07:0/,\$p" data/logs/update.log | grep -q "UPDATE FAILED" && echo OK || echo PROBLEM
+
 ### When picks lock
 
 The "current week" is the earliest week with an unfinished game. Each run snapshots lines for that week, plus next week once its freeze window is open. A game's line freezes at the first capture on or after 7:00 AM CT on the Tuesday before the week's first kickoff (`FREEZE_*` in `config.py`). Earlier captures are logged in `line_snapshots.csv` but never frozen. Picks lock on the first run where (a) the line is frozen and (b) every earlier game is final **and** in nflverse play-by-play. With the daily 7am run, lines freeze Tuesday at 7am and picks usually lock at the same time, or Wednesday if the Monday-night play-by-play is late. Either way it's before Thursday kickoff.

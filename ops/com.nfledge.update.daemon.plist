@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  System-level version of com.nfledge.update.plist: a LaunchDaemon that runs as __USER__ at 7:00 AM local time
+  whether or not anyone is logged in (e.g. after a crash/restart leaves the Mac at the login window).
+  Install with ops/install-daemon.sh, which fills in the placeholders, removes the per-user LaunchAgent so the
+  job can't run twice, and sets up a deploy key, because a daemon can't read the login keychain for git push.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.nfledge.update</string>
+  <key>UserName</key><string>__USER__</string>
+  <key>GroupName</key><string>staff</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>__HOME__</string>
+  </dict>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd /path/to/nfl-edge &amp;&amp; AUTO_DEPLOY=1 LEDGER_AUTOCOMMIT=1 ./update.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>/path/to/nfl-edge/data/logs/update.log</string>
+  <key>StandardErrorPath</key><string>/path/to/nfl-edge/data/logs/update.log</string>
+</dict>
+</plist>

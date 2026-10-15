@@ -412,13 +412,17 @@ def build_all(results):
     (tmp / "ledger").mkdir(exist_ok=True)
     if (ROOT / "backtest_results.md").exists():
         shutil.copy(ROOT / "backtest_results.md", tmp / "ledger" / "backtest_results.md")
-    (tmp / "_headers").write_text("/ledger/*\n  Content-Type: text/plain; charset=utf-8\n  Cache-Control: no-cache\n"
+    (tmp / "_headers").write_text("/status.json\n  Cache-Control: no-store\n"
+                                  "/ledger/*\n  Content-Type: text/plain; charset=utf-8\n  Cache-Control: no-cache\n"
                                   "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n")
     # pre-NCAAF NFL URLs keep working
     (tmp / "_redirects").write_text("/game/* /nfl/game/:splat 301\n/week/* /nfl/week/:splat 301\n"
                                     "/record.html /nfl/record.html 301\n/ncaaf/record.html /ncaaf/ 302\n"
                                     "/ncaaf/record /ncaaf/ 302\n")
     (tmp / "404.html").write_text(e.get_template("404.html").render(root="/", page="404"))
+    # heartbeat from the last successful update.sh run (watchdog); carried through plain rebuilds
+    if (ROOT / "data" / "status.json").exists():
+        shutil.copy(ROOT / "data" / "status.json", tmp / "status.json")
 
     if OUT.exists():
         shutil.rmtree(OUT)

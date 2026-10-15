@@ -20,6 +20,7 @@ trap 'rc=$?; [ $rc -ne 0 ] && echo "[$(date +%H:%M:%S)] UPDATE FAILED (exit $rc)
 
 .venv/bin/python -m nfledge.pipeline update "$@"
 
+PUSH=skipped
 if [ "${LEDGER_AUTOCOMMIT:-0}" = "1" ] && [ -d .git ]; then
   if [ -n "$(git status --porcelain ledger)" ]; then
     git add ledger
@@ -27,9 +28,20 @@ if [ "${LEDGER_AUTOCOMMIT:-0}" = "1" ] && [ -d .git ]; then
     echo "ledger changes committed"
   fi
   if git remote get-url origin >/dev/null 2>&1; then
-    git push -q origin HEAD 2>&1 && echo "pushed to origin" || echo "WARNING: git push failed; ledger committed locally only" >&2
+    if git push -q origin HEAD 2>&1; then
+      echo "pushed to origin"; PUSH=ok
+    else
+      echo "WARNING: git push failed; ledger committed locally only" >&2; PUSH=failed
+    fi
   fi
 fi
+
+# Heartbeat for the off-machine watchdog (.github/workflows/watchdog.yml). Written only after a successful
+# pipeline run, deployed with the site; the watchdog fails if it goes stale or reports a failed push.
+printf '{"updated_at": "%s", "commit": "%s", "ledger_push": "%s"}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git rev-parse --short HEAD 2>/dev/null || echo none)" "$PUSH" > data/status.json
+cp data/status.json site/status.json
+echo "[$(date +%H:%M:%S)] heartbeat written (ledger push: $PUSH)"
 
 if [ "${AUTO_DEPLOY:-0}" = "1" ]; then
   ./deploy.sh

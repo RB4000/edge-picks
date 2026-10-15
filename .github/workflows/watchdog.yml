@@ -1,0 +1,49 @@
+# Off-machine watchdog for the daily 7am CT update. The Mac can't report a run that never starts (crash, hang,
+# power loss, stuck at the login window), so this checks the heartbeat that update.sh deploys with the site.
+# A failed scheduled run emails the repo owner (GitHub > Settings > Notifications > Actions).
+# Note: GitHub pauses scheduled workflows after 60 days with no commits to the repo (e.g. a quiet offseason);
+# re-enable it from the Actions tab if that happens.
+name: update-watchdog
+
+on:
+  schedule:
+    - cron: "30 14 * * *"   # 14:30 UTC = 9:30 CDT / 8:30 CST, after the 7:00 CT run
+  workflow_dispatch:
+    inputs:
+      max_age_hours:
+        description: "Fail if the last successful update is older than this (use 0 to test the alert)"
+        default: "26"
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the deployed heartbeat
+        env:
+          URL: https://edge-picks.nfl-edge.workers.dev/status.json
+          MAX_AGE_HOURS: ${{ inputs.max_age_hours || '26' }}
+        run: |
+          set -euo pipefail
+          if ! body=$(curl -fsS --retry 3 --retry-delay 10 "$URL?nocache=$(date +%s)"); then
+            echo "::error::Heartbeat not reachable at $URL"
+            exit 1
+          fi
+          echo "Heartbeat: $body"
+          python3 - "$body" <<'PY'
+          import json, os, sys
+          from datetime import datetime, timezone
+          hb = json.loads(sys.argv[1])
+          age = (datetime.now(timezone.utc) - datetime.fromisoformat(hb["updated_at"].replace("Z", "+00:00"))).total_seconds() / 3600
+          limit = float(os.environ["MAX_AGE_HOURS"])
+          problems = []
+          if age > limit:
+              problems.append(f"last successful update was {age:.1f}h ago ({hb['updated_at']}), limit {limit:g}h: "
+                              "the 7am run did not happen or failed (check the Mac and data/logs/update.log)")
+          if hb.get("ledger_push") == "failed":
+              problems.append("the last run could not push the ledger to GitHub")
+          for p in problems:
+              print(f"::error::{p}")
+          if problems:
+              sys.exit(1)
+          print(f"OK: last successful update {age:.1f}h ago, ledger push {hb.get('ledger_push')}")
+          PY
