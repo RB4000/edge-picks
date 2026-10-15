@@ -4,14 +4,13 @@
 <p class="fine">Walk-forward: before each week, ratings were refit using only earlier games. {{ bt.n_games }} games, graded against {{ close_label }} <strong>closing</strong> lines (the hardest number to beat) at −110. Parameters were fixed before the backtest and not tuned to it.</p>
 <div class="tablewrap">
 <table class="data">
-  <thead><tr><th>Tier</th><th>ATS</th><th>ATS %</th><th>Units</th><th>Totals</th><th>Totals %</th><th>Units</th></tr></thead>
+  <thead><tr><th>Tier</th><th>ATS</th><th>ATS %</th><th>Units</th></tr></thead>
   <tbody>
   {% for t in ['All'] + tiers %}
-    {% set s = bt.spread[t] %}{% set o = bt.total[t] %}
+    {% set s = bt.spread[t] %}
     <tr{% if t == 'All' %} class="row-strong"{% endif %}>
       <th scope="row">{{ t }}{% if t != 'All' %} pts{% endif %}</th>
       <td class="num">{{ s.label }}</td><td class="num">{{ s.pct|pct }}</td><td class="num">{{ s.units|units }}</td>
-      <td class="num">{{ o.label }}</td><td class="num">{{ o.pct|pct }}</td><td class="num">{{ o.units|units }}</td>
     </tr>
   {% endfor %}
   </tbody>
@@ -19,15 +18,15 @@
 </div>
 <div class="tablewrap">
 <table class="data">
-  <thead><tr><th>Season</th><th>ATS</th><th>ATS %</th><th>Totals</th><th>Totals %</th></tr></thead>
+  <thead><tr><th>Season</th><th>ATS</th><th>ATS %</th></tr></thead>
   <tbody>
   {% for s, d in bt.by_season.items() %}
-    <tr><th scope="row">{{ s }}</th><td class="num">{{ d.spread.label }}</td><td class="num">{{ d.spread.pct|pct }}</td><td class="num">{{ d.total.label }}</td><td class="num">{{ d.total.pct|pct }}</td></tr>
+    <tr><th scope="row">{{ s }}</th><td class="num">{{ d.spread.label }}</td><td class="num">{{ d.spread.pct|pct }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
-<p class="fine">Mean absolute error on game margin: model {{ bt.accuracy.model_margin_mae|num(2) }} pts vs. closing line {{ bt.accuracy.market_margin_mae|num(2) }}. On totals: {{ bt.accuracy.model_total_mae|num(2) }} vs. {{ bt.accuracy.market_total_mae|num(2) }}. Calibration slope (actual margin on model margin): {{ bt.accuracy.margin_slope|num(2) }}, where values above 1 mean the model's spreads are too compressed. Over share of total picks: {{ bt.over_share|pct }}{% if bt.v1_0 %} (uncalibrated: {{ bt.v1_0.over_share|pct }}){% endif %}. Break-even at −110 is 52.4%.</p>
+<p class="fine">Mean absolute error on game margin: model {{ bt.accuracy.model_margin_mae|num(2) }} pts vs. closing line {{ bt.accuracy.market_margin_mae|num(2) }}. Calibration slope (actual margin on model margin): {{ bt.accuracy.margin_slope|num(2) }}, where values above 1 mean the model's spreads are too compressed. Break-even at −110 is 52.4%.</p>
 {%- endmacro %}
 {% block content %}
 <section class="intro">
@@ -38,7 +37,7 @@
 
 <section class="panel prose" id="what-this-is">
   <h2>What this site is, and isn't</h2>
-  <p><strong>The NFL model does not beat closing lines.</strong> In a walk-forward backtest of the 2022–2025 seasons ({{ bts.nfl.n_games if bts.nfl else '' }} games), its spread picks went {{ bts.nfl.spread.All.label if bts.nfl else '' }} ({{ bts.nfl.spread.All.pct|pct if bts.nfl else '' }}) and its totals {{ bts.nfl.total.All.label if bts.nfl else '' }} ({{ bts.nfl.total.All.pct|pct if bts.nfl else '' }}). That's roughly a coin flip and below the 52.4% needed to break even at standard −110 odds. Its largest edges (3.5+ points) went 51.9% against the spread and 52.4% on totals, neither distinguishable from break-even. When we asked how much weight the model's line deserves when blended with the market's, the answer fit on actual results was zero.</p>
+  <p><strong>The NFL model does not beat closing lines.</strong> In a walk-forward backtest of the 2022–2025 seasons ({{ bts.nfl.n_games if bts.nfl else '' }} games), its spread picks went {{ bts.nfl.spread.All.label if bts.nfl else '' }} ({{ bts.nfl.spread.All.pct|pct if bts.nfl else '' }}). That's roughly a coin flip and below the 52.4% needed to break even at standard −110 odds. Its largest edges (3.5+ points) went {{ bts.nfl.spread['3.5+'].pct|pct if bts.nfl else '' }}, not distinguishable from break-even. When we asked how much weight the model's line deserves when blended with the market's, the answer fit on actual results was zero.</p>
   <p>Past seasons can only be graded against closing lines, because there is no archive of the early-week lines we freeze. The live record grades against those frozen lines. Early-week numbers are softer than closing ones, so the live record may run a little better than the backtest, or it may not. It is too new to tell, and we don't expect it to beat the market.</p>
   <p><strong>What we do offer is a record you can trust.</strong> The model is public, and so is every number it produces:</p>
   <ul>
@@ -47,6 +46,7 @@
     <li>Every pick is graded twice, against the frozen line and against the closing line, with closing line value reported, so you can see whether the model beat the number or just got lucky.</li>
     <li>Losing weeks stay up. The backtests on this page are the honest ones, not the best ones.</li>
   </ul>
+  <p><strong>Sides only.</strong> The site picks and grades point spreads, nothing else. {% if totals_archive %}Totals (over/under) picks were also made through {{ totals_archive.season }} Week {{ totals_archive.last_week }}, when they went {{ totals_archive.frozen.label }} against the frozen line, and were discontinued on {{ totals_archive.discontinued }}, before any later game kicked off. Those picks and their grades remain in the ledger CSVs.{% endif %}</p>
   <p>College football gets projections only (below). One narrow hypothesis is being tested forward as a separate experiment (below).</p>
 </section>
 
@@ -57,8 +57,8 @@
 
 <section class="panel prose" id="college">
   <h2>Why college is projections only</h2>
-  <p>We tested the college model against the betting market and it does not beat closing prices. Over 3,174 FBS games from 2022 to 2025, run walk-forward, its spread picks went 48.9% against the closing line and its totals 51.8%. Both are below the 52.4% needed to break even at standard odds.</p>
-  <p>We also asked a more direct question: if you blend the model's line with the market's, how much weight does the model deserve? Fit on actual results, the answer for spreads was zero (every season between −0.06 and +0.05). For totals it was about 0.15, too small to produce a meaningful edge. The market already knows what the model knows, and more.</p>
+  <p>We tested the college model against the betting market and it does not beat closing prices. Over 3,174 FBS games from 2022 to 2025, run walk-forward, its spread picks went 48.9% against the closing line, below the 52.4% needed to break even at standard odds.</p>
+  <p>We also asked a more direct question: if you blend the model's line with the market's, how much weight does the model deserve? Fit on actual results, the answer for spreads was zero (every season between −0.06 and +0.05). The market already knows what the model knows, and more.</p>
   <p>So for college football we publish projected scores, model lines and opponent-adjusted ratings, updated weekly, because they are a useful picture of how teams play. We do not make, count or grade college picks. The market consensus appears next to each projection for context only. A gap between the two is not an edge.</p>
 </section>
 
@@ -69,20 +69,20 @@
   <h2>2. A prior instead of a blank slate</h2>
   <p>NFL seasons start from last season's final ratings, pulled {{ ((1 - cfg.PRIOR_REGRESSION) * 100)|int }}% back toward average to account for turnover. College (model v1.1) uses a preseason prior model instead: last season's rating plus the 247Sports roster-talent composite, with weights estimated each year from earlier seasons only. Recency weighting favors recent games without discounting the season's total evidence, so by midseason the current year dominates.</p>
   <h2>3. Pace</h2>
-  <p>The same regression structure, run on offensive plays per game, gives each team a pace rating for its offense and for what its defense allows. Projected plays × projected efficiency is what drives the total.</p>
+  <p>The same regression structure, run on offensive plays per game, gives each team a pace rating for its offense and for what its defense allows. Projected plays × projected efficiency is what turns ratings into projected points.</p>
   <h2>4. Home field enters exactly once</h2>
-  <p>The home/road term inside the regressions is only a control. It keeps a team that has played four home games from looking better than it is, and it is <strong>discarded</strong> when a game is projected. Home field enters the projection once, as points: half added to the home score and half subtracted from the away score, so it moves the spread but not the total.</p>
+  <p>The home/road term inside the regressions is only a control. It keeps a team that has played four home games from looking better than it is, and it is <strong>discarded</strong> when a game is projected. Home field enters the projection once, as points: half added to the home score and half subtracted from the away score, so it moves the spread but not the combined score.</p>
   <ul>
     <li><strong>NFL:</strong> the recency-weighted average home margin in non-neutral games. NFL schedules are balanced (every team plays about half its games at home), so team strength cancels out of that average.</li>
     <li><strong>College:</strong> schedules are not balanced, since big programs host smaller ones, so a raw average would overstate home field. Instead, a regression of FBS-vs-FBS margins on each team-season's strength plus a home indicator isolates the home effect.</li>
     <li>Neutral-site games, including international games and bowls, get zero home field.</li>
   </ul>
-  <h2>5. Totals calibration</h2>
-  <p>Scoring skews high: a few shootouts pull the average game above the typical one. The model projects averages, while market totals sit near the typical (median) game, so an uncalibrated model leans over. Each week, projected totals are shifted by the median gap between model and market totals across every earlier game.</p>
+  <h2>5. Scoring calibration</h2>
+  <p>Scoring skews high: a few shootouts pull the average game above the typical one. Each week, projected scores are shifted down by the median gap between the model's and the market's combined scores across every earlier game. The shift is split evenly between the two teams, so it changes the projected score but never the spread.</p>
   <h2>5b. College scale calibration</h2>
-  <p>College model v1.0 produced spreads that were far too compressed: its margins varied about 40% as much as the market's. v1.1 multiplies each projected team-strength margin by the slope of actual margins on model margins over every earlier game (home field removed), and applies the same correction to totals before the median-gap step. This calibration is fit on game results, never on market lines. Before/after numbers are in the backtest report.</p>
-  <h2>6. Picks (NFL only)</h2>
-  <p>Model spread and total are compared with the market line. The difference is the edge, and the pick is whichever side the model prefers. Edges are grouped into tiers: under 2 points, 2–3.5, and 3.5+. College games get projections only (see above).</p>
+  <p>College model v1.0 produced spreads that were far too compressed: its margins varied about 40% as much as the market's. v1.1 multiplies each projected team-strength margin by the slope of actual margins on model margins over every earlier game (home field removed). This calibration is fit on game results, never on market lines. Before/after numbers are in the backtest report.</p>
+  <h2>6. Picks (NFL sides only)</h2>
+  <p>The model spread is compared with the market spread. The difference is the edge, and the pick is whichever side the model prefers. Edges are grouped into tiers: under 2 points, 2–3.5, and 3.5+. College games get projections only (see above).</p>
   <h2>7. The rules</h2>
   <ul>
     <li>Each game's line is frozen at the first capture on or after 7:00 AM CT on Tuesday of game week. Picks are graded against it, never against a later number. NFL Week 5 of 2026, the launch week, froze at first capture on Wednesday 10/7; those rows are labeled on the record page.</li>

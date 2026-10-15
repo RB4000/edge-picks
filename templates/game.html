@@ -41,25 +41,16 @@
       <div class="pb-cmp">Market {{ H }} <span class="num">{{ p.line_home_spread|line }}</span> · Model {{ H }} <span class="num">{{ p.model_home_spread|line }}</span></div>
       {% if p.spread_result %}<div class="pb-res">vs frozen line {{ result_chip(p.spread_result) }}{% if p.spread_result_close %} · vs close {{ result_chip(p.spread_result_close) }}{% endif %}</div>{% endif %}
     </div>
-    <div class="pickbox">
-      <div class="pb-label">Total</div>
-      {% if p.total_pick != 'PASS' %}
-      <div class="pb-pick num">{{ 'Over' if p.total_pick == 'OVER' else 'Under' }} {{ p.line_total|num }}</div>
-      <div class="pb-edge">Edge <span class="num">{{ p.total_edge|num }}</span> pts · tier {{ p.total_tier }} {{ edgebar(p.total_edge, p.total_tier_slug) }}</div>
-      {% else %}<div class="pb-pick">No edge</div>{% endif %}
-      <div class="pb-cmp">Market <span class="num">{{ p.line_total|num }}</span> · Model <span class="num">{{ p.model_total|num }}</span></div>
-      {% if p.total_result %}<div class="pb-res">vs frozen line {{ result_chip(p.total_result) }}{% if p.total_result_close %} · vs close {{ result_chip(p.total_result_close) }}{% endif %}</div>{% endif %}
-    </div>
   </div>
   <dl class="audit">
-    <div><dt>Line graded on</dt><dd>{{ H }} <span class="num">{{ p.line_home_spread|line }}</span>, total <span class="num">{{ p.line_total|num }}</span></dd></div>
+    <div><dt>Line graded on</dt><dd>{{ H }} <span class="num">{{ p.line_home_spread|line }}</span></dd></div>
     <div><dt>Line source</dt><dd>{{ p.line_source }}</dd></div>
     <div><dt>Line frozen</dt><dd>{{ p.line_fetched_at|captured }}{% if (season, week) < sp.s.freeze_policy_from %} · launch-week capture, before the Tuesday 7am CT freeze rule{% endif %}</dd></div>
     <div><dt>Pick locked</dt><dd>{{ p.locked_at|ts }}</dd></div>
     <div><dt>Kickoff</dt><dd>{{ p.kickoff_utc|ts }}</dd></div>
     {% if has_close %}
-    <div><dt>Closing line</dt><dd>{{ H }} <span class="num">{{ p.close_home_spread|line }}</span>, total <span class="num">{{ p.close_total|num }}</span> · {{ p.close_source }}</dd></div>
-    <div><dt>Closing line value</dt><dd>spread <span class="num">{{ p.spread_clv|signed }}</span> · total <span class="num">{{ p.total_clv|signed }}</span></dd></div>
+    <div><dt>Closing line</dt><dd>{{ H }} <span class="num">{{ p.close_home_spread|line }}</span> · {{ p.close_source }}</dd></div>
+    <div><dt>Closing line value</dt><dd class="num">{{ p.spread_clv|signed }}</dd></div>
     {% endif %}
     <div><dt>Model</dt><dd class="num">{{ p.model_version }} · <a href="{{ root }}{{ sp.ledger_prefix }}ratings/{{ p.ratings_file }}">ratings file</a></dd></div>
   </dl>
@@ -71,8 +62,8 @@
   <h2>Projection</h2>
   <dl class="audit">
     <div><dt>Projected score</dt><dd class="num">{{ sp.abbr(g.away) }} {{ q.away_pts|num }}, {{ H }} {{ q.home_pts|num }}</dd></div>
-    <div><dt>Model line</dt><dd>{{ H }} <span class="num">{{ q.home_spread|line }}</span>, total <span class="num">{{ q.total|num }}</span></dd></div>
-    <div><dt>Market consensus (context)</dt><dd>{% if q.mkt_home_spread == q.mkt_home_spread and q.mkt_home_spread is not none %}{{ H }} <span class="num">{{ q.mkt_home_spread|line }}</span>, total <span class="num">{{ q.mkt_total|num }}</span> · CFBD{% else %}—{% endif %}</dd></div>
+    <div><dt>Model line</dt><dd>{{ H }} <span class="num">{{ q.home_spread|line }}</span></dd></div>
+    <div><dt>Market consensus (context)</dt><dd>{% if q.mkt_home_spread == q.mkt_home_spread and q.mkt_home_spread is not none %}{{ H }} <span class="num">{{ q.mkt_home_spread|line }}</span> · CFBD{% else %}—{% endif %}</dd></div>
     <div><dt>Model</dt><dd class="num">{{ snap.model_version }} · <a href="{{ root }}{{ sp.ledger_prefix }}ratings/{{ season }}_w{{ '%02d' % week }}.json">ratings file</a></dd></div>
   </dl>
   <p class="fine">Not a pick. In backtests this model does not beat closing lines, so a gap between the model line and the market is not an edge. <a href="{{ root }}method.html#college">Method</a>.</p>

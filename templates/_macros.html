@@ -32,7 +32,6 @@
     <thead><tr><th></th><th>Model</th><th>Market</th></tr></thead>
     <tbody>
       <tr><th scope="row">Spread</th><td class="num">{{ sp.abbr(g.home) }} {{ q.home_spread|line }}</td><td class="num muted">{{ sp.abbr(g.home) ~ ' ' ~ (q.mkt_home_spread|line) if q.mkt_home_spread == q.mkt_home_spread and q.mkt_home_spread is not none else '—' }}</td></tr>
-      <tr><th scope="row">Total</th><td class="num">{{ q.total|num }}</td><td class="num muted">{{ q.mkt_total|num }}</td></tr>
     </tbody>
   </table>
   {% else %}
@@ -76,18 +75,6 @@
           {% else %}<span class="muted">No edge</span>{% endif %}
         </td>
       </tr>
-      <tr>
-        <th scope="row">Total</th>
-        <td class="num">{{ p.line_total|num }}</td>
-        <td class="num">{{ p.model_total|num }}</td>
-        <td class="pick-cell">
-          {% if p.total_pick != 'PASS' %}
-          <span class="pick num">{{ 'Over' if p.total_pick == 'OVER' else 'Under' }} {{ p.line_total|num }}</span>
-          <span class="edge"><span class="num">{{ p.total_edge|num }}</span> pts {{ edgebar(p.total_edge, p.total_tier_slug) }}</span>
-          {{ result_chip(p.total_result) }}
-          {% else %}<span class="muted">No edge</span>{% endif %}
-        </td>
-      </tr>
     </tbody>
   </table>
   {% elif g.status == 'pending' %}
@@ -105,8 +92,8 @@
 {%- endmacro %}
 
 {% macro record_tiles(rec) -%}
-<section class="tiles tiles-6">
-  {% for mkt, label in [('spread', 'ATS'), ('total', 'Totals')] %}
+<section class="tiles tiles-3">
+  {% for mkt, label in [('spread', 'ATS')] %}
   {% set a = rec[mkt].tiers.All %}
   <div class="tile">
     <div class="tile-label">{{ label }} · vs frozen line</div>
@@ -131,19 +118,22 @@
 <div class="tablewrap">
 <table class="data">
   <thead>
-    <tr><th rowspan="2">Tier</th><th colspan="2" class="grp">ATS</th><th colspan="2" class="grp">Totals</th></tr>
-    <tr><th>vs frozen</th><th>vs close</th><th>vs frozen</th><th>vs close</th></tr>
+    <tr><th rowspan="2">Tier</th><th colspan="2" class="grp">ATS</th></tr>
+    <tr><th>vs frozen</th><th>vs close</th></tr>
   </thead>
   <tbody>
   {% for t in ['All'] + tiers %}
-    {% set s = rec.spread.tiers[t] %}{% set o = rec.total.tiers[t] %}
+    {% set s = rec.spread.tiers[t] %}
     <tr{% if t == 'All' %} class="row-strong"{% endif %}>
       <th scope="row">{{ t }}{% if t != 'All' %} pts{% endif %}</th>
       <td>{{ rec_cell(s.frozen) }}</td><td>{{ rec_cell(s.close) }}</td>
-      <td>{{ rec_cell(o.frozen) }}</td><td>{{ rec_cell(o.close) }}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
+{%- endmacro %}
+
+{% macro totals_note(ta) -%}
+{% if ta %}<p class="fine">Sides only. Totals (over/under) picks were also made through {{ ta.season }} Week {{ ta.last_week }} and went <span class="num">{{ ta.frozen.label }}</span> (<span class="num">{{ ta.frozen.units|units }}u</span>) against the frozen line, <span class="num">{{ ta.close.label }}</span> against the close. They were discontinued on {{ ta.discontinued }}, before any later game kicked off. Those picks and grades stay in the ledger CSVs; total picks locked for later weeks are void and not graded.</p>{% endif %}
 {%- endmacro %}

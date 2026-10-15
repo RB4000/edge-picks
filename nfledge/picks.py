@@ -15,8 +15,8 @@ def tier_of(edge):
     return config.TIERS[-1][0]
 
 
-def make_pick(home, away, model_margin, model_total, market_home_spread, market_total):
-    """Model margin is home minus away. Market spread is in betting notation for the home side."""
+def make_pick(home, away, model_margin, market_home_spread):
+    """Sides only. Model margin is home minus away. Market spread is in betting notation for the home side."""
     out = {}
     if market_home_spread is not None and not math.isnan(market_home_spread):
         edge = model_margin + market_home_spread  # >0: home expected to cover by `edge` points
@@ -27,10 +27,6 @@ def make_pick(home, away, model_margin, model_total, market_home_spread, market_
         else:
             out.update(spread_pick="PASS", spread_pick_line=None)
         out.update(spread_edge=round(abs(edge), 2), spread_tier=tier_of(edge))
-    if market_total is not None and not math.isnan(market_total):
-        edge = model_total - market_total
-        out.update(total_pick="OVER" if edge > 0 else "UNDER" if edge < 0 else "PASS",
-                   total_edge=round(abs(edge), 2), total_tier=tier_of(edge))
     return out
 
 
@@ -41,6 +37,11 @@ def grade_spread(pick_team, home, home_spread, home_score, away_score):
     if pick_team != home:
         cover = -cover
     return "W" if cover > 0 else "L" if cover < 0 else "P"
+
+
+def totals_live(season, week):
+    """Totals picks count only through config.TOTALS_LAST_WEEK; later ones are void."""
+    return (int(season), int(week)) <= config.TOTALS_LAST_WEEK
 
 
 def grade_total(pick, total_line, home_score, away_score):

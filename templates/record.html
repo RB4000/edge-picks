@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import result_chip, record_tiles, tier_table with context %}
+{% from "_macros.html" import result_chip, record_tiles, tier_table, totals_note with context %}
 {% block title %}{{ sp.label }} {{ season }} Record · {{ cfg.BRAND_NAME }}{% endblock %}
 {% block content %}
 <section class="intro">
@@ -9,6 +9,7 @@
 </section>
 
 {{ record_tiles(rec) }}
+{{ totals_note(rec.totals_archive) }}
 
 <section class="panel">
   <h2>By edge tier</h2>
@@ -49,7 +50,6 @@
   <table class="data log">
     <thead><tr>
       <th>Wk</th><th>Game</th><th>Spread pick</th><th>Edge</th><th>Close</th><th>CLV</th><th>Frozen</th><th>@Close</th>
-      <th>Total pick</th><th>Edge</th><th>Close</th><th>CLV</th><th>Frozen</th><th>@Close</th>
       <th>Score</th><th>Frozen line</th><th>Locked</th><th>Kickoff</th>
     </tr></thead>
     <tbody>
@@ -63,19 +63,13 @@
         <td class="num">{{ r.spread_clv|signed }}</td>
         <td>{{ result_chip(r.spread_result) }}</td>
         <td>{{ result_chip(r.spread_result_close) }}</td>
-        <td class="num">{{ r.total_pick|title }} {{ r.line_total|num }}</td>
-        <td class="num">{{ r.total_edge|num }}</td>
-        <td class="num">{{ r.close_total|num }}</td>
-        <td class="num">{{ r.total_clv|signed }}</td>
-        <td>{{ result_chip(r.total_result) }}</td>
-        <td>{{ result_chip(r.total_result_close) }}</td>
         <td class="num">{% if r.final == true %}{{ r.away_score|int }}–{{ r.home_score|int }}{% else %}—{% endif %}</td>
         <td class="ts">{{ r.line_fetched_at|captured }}{% if r.pre_policy %} †{% endif %}</td>
         <td class="ts">{{ r.locked_at|ts }}</td>
         <td class="ts">{{ r.kickoff_utc|ts }}</td>
       </tr>
     {% else %}
-      <tr><td colspan="18" class="note">No picks locked yet this season.</td></tr>
+      <tr><td colspan="12" class="note">No picks locked yet this season.</td></tr>
     {% endfor %}
     </tbody>
   </table>

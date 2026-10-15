@@ -170,7 +170,6 @@ def game_views(sched, graded, season, week, now, pickable_only=True):
         if g.game_id in gi.index:
             p = gi.loc[g.game_id].to_dict()
             p["spread_tier_slug"] = tier_slug(p.get("spread_tier"))
-            p["total_tier_slug"] = tier_slug(p.get("total_tier"))
             v["pick"] = p
             v["status"] = "locked"
         elif g.kickoff_utc <= now:
@@ -243,18 +242,19 @@ def explain(fit, g, snap, sv, rank_pool):
         f"points ≈ {lt['pts_a']:.1f} + {lt['pts_b']:.2f}×plays + {lt['pts_c']:.2f}×(plays × EPA/play).",
     ]
     if lt["total_offset"]:
-        lines.append(f"Totals calibration: the projected total is lowered by {lt['total_offset']:.1f} points. Scoring "
-                     f"skews high, so a mean projection runs above the typical (median) game the market prices. "
-                     f"The offset is the median gap between model and market totals across all earlier games.")
+        lines.append(f"Scoring calibration: the projected scores are lowered by {lt['total_offset']:.1f} points combined. "
+                     f"Scoring skews high, so a mean projection runs above the typical (median) game. "
+                     f"This shifts both scores equally and does not move the spread.")
     out["sentences"] = lines
     return out
 
 
 def records(graded, season=None):
-    """Records by market and tier, graded vs the frozen line and vs the closing line, plus CLV."""
+    """Sides only: records by tier, graded vs the frozen line and vs the closing line, plus CLV.
+    `totals_archive` is the discontinued totals record (picks through config.TOTALS_LAST_WEEK), for disclosure."""
     g = graded if season is None or not len(graded) else graded[graded["season"] == season]
-    out = {}
-    for mkt in ("spread", "total"):
+    out = {"totals_archive": totals_archive(g)}
+    for mkt in ("spread",):
         tiers = {}
         for name in ["All"] + [t[0] for t in config.TIERS]:
             sub = g if name == "All" or not len(g) else g[g[f"{mkt}_tier"] == name]
@@ -267,6 +267,16 @@ def records(graded, season=None):
         out[mkt] = {"tiers": tiers, "clv_avg": clv.mean() if len(clv) else None,
                     "clv_beat": (clv > 0).mean() if len(clv) else None, "clv_n": len(clv)}
     return out
+
+
+def totals_archive(g):
+    """The discontinued totals record. None if this ledger never graded a total."""
+    if not len(g) or "total_result" not in g or not g["total_result"].isin(["W", "L", "P"]).any():
+        return None
+    last = config.TOTALS_LAST_WEEK
+    return {"frozen": picks.record(g["total_result"]), "close": picks.record(g["total_result_close"]),
+            "season": last[0], "last_week": last[1],
+            "discontinued": datetime.strptime(config.TOTALS_DISCONTINUED, "%Y-%m-%d").strftime("%B %-d, %Y")}
 
 
 def experiment(graded, season):
@@ -375,7 +385,7 @@ def build_all(results):
     for b in built:
         cur = b["current"] or {"games": [], "week": b["week"], "n_locked": 0}
         locked = [g for g in cur["games"] if g["status"] == "locked"]
-        top = sorted(locked, key=lambda g: -max(g["pick"].get("spread_edge") or 0, g["pick"].get("total_edge") or 0))[:5]
+        top = sorted(locked, key=lambda g: -(g["pick"].get("spread_edge") or 0))[:5]
         cards.append({"sv": b["sv"], "week": cur["week"], "n_games": len(cur["games"]), "n_locked": cur["n_locked"],
                       "top": top, "rec": b["rec"]})
     (tmp / "index.html").write_text(e.get_template("home.html").render(overall=overall, cards=cards, root="", page="home"))
@@ -387,7 +397,8 @@ def build_all(results):
         p = ROOT / "results" / f"backtest_summary_{key}.json"
         bts[key] = json.loads(p.read_text()) if p.exists() else None
     params = {k: (ratings.model_params(s.params()), ratings.model_version(s.params())) for k, s in BY_KEY.items()}
-    (tmp / "method.html").write_text(e.get_template("method.html").render(bts=bts, params=params, root="", page="method"))
+    (tmp / "method.html").write_text(e.get_template("method.html").render(bts=bts, params=params, totals_archive=overall["totals_archive"],
+                                                                         root="", page="method"))
 
     # raw ledgers for anyone to audit (NFL paths unchanged since launch)
     for b in built:

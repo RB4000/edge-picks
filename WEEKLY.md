@@ -15,9 +15,9 @@ The daily 7am CT job does the work. This is the human part, about 15 minutes on 
   - Every game should show a pick. "no pick locked" means no line was captured yet (rare: usually a flexed game or a late-posted line).
   - Sanity-check any 3.5+ edge. A huge edge on a team with a QB change usually means the market knows something the model can't see. **Don't edit anything.** The pick stands; that's the point. Just know about it before you post.
 - [ ] **Look at last week:** open `site/record.html` (or `make serve`) and check:
-  - Last week's ATS / totals result
+  - Last week's ATS result
   - Season record by tier
-  - Average CLV (spread and total), and the **vs closing line** record next to the official vs-frozen record
+  - Average spread CLV, and the **vs closing line** record next to the official vs-frozen record
 - [ ] **Deploy** (if not on `AUTO_DEPLOY=1`): `make deploy`
 - [ ] **Commit the ledger** (if not on `LEDGER_AUTOCOMMIT=1`): `git add ledger && git commit -m "week N picks"`. Pushing to a public repo gives you third-party timestamps.
 
@@ -27,7 +27,7 @@ The daily 7am CT job does the work. This is the human part, about 15 minutes on 
    > Week N is locked. Lines frozen [date/time], graded against those numbers no matter where they move. Full card + breakdowns: [link]
 2. **Thursday:** the TNF game page (breakdown + pick), screenshot from `site/game/<id>.html`.
 3. **Results (Tuesday, with the new card):** last week's record by tier plus CLV. Post losing weeks the same way you post winning ones. That's the brand.
-   > Week N: ATS X-Y, totals X-Y. 3.5+ tier: X-Y. Avg CLV +Z pts. Season: … Every pick, line and timestamp: [link]/record.html
+   > Week N: ATS X-Y. 3.5+ tier: X-Y. Avg CLV +Z pts. Season: … Every pick, line and timestamp: [link]/record.html
 4. **Monthly:** link the methodology (README "The method, in plain English" is screenshot-ready) and `backtest_results.md`, including that the backtest did not beat closing lines.
 
 ## Don'ts

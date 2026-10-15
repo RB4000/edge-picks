@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import record_tiles, tier_table with context %}
+{% from "_macros.html" import record_tiles, tier_table, totals_note with context %}
 {% block title %}{{ cfg.BRAND_NAME }}{% endblock %}
 {% block content %}
 <section class="intro">
@@ -10,6 +10,7 @@
 
 <h2 class="day-label">Overall record{% if cfg.NCAAF_PROJECTIONS_ONLY %} (NFL; college is projections only){% endif %}</h2>
 {{ record_tiles(overall) }}
+{{ totals_note(overall.totals_archive) }}
 
 <div class="hub">
 {% for c in cards %}
@@ -23,18 +24,16 @@
   <p class="fine">{{ sp.projections_note }} <a href="method.html#college">Why</a>.</p>
   <p class="fine">{{ c.n_games }} FBS vs FBS games this week · <a href="{{ sp.key }}/index.html">projected scores and model lines</a></p>
   {% else %}
-  <p class="fine">{{ c.n_locked }} of {{ c.n_games }} games locked{% if sp.key == 'ncaaf' %} (FBS vs FBS with a market line){% endif %} · season: ATS {{ c.rec.spread.tiers.All.frozen.label or '0-0' }}, totals {{ c.rec.total.tiers.All.frozen.label or '0-0' }} · <a href="{{ sp.key }}/record.html">record</a></p>
+  <p class="fine">{{ c.n_locked }} of {{ c.n_games }} games locked{% if sp.key == 'ncaaf' %} (FBS vs FBS with a market line){% endif %} · season ATS {{ c.rec.spread.tiers.All.frozen.label or '0-0' }} · <a href="{{ sp.key }}/record.html">record</a></p>
   {% if c.top %}
   <table class="data hub-table">
-    <thead><tr><th>Game</th><th>Spread</th><th>Edge</th><th>Total</th><th>Edge</th></tr></thead>
+    <thead><tr><th>Game</th><th>Spread</th><th>Edge</th></tr></thead>
     <tbody>
     {% for g in c.top %}{% set p = g.pick %}
       <tr>
         <td><a href="{{ sp.key }}/game/{{ g.id }}.html">{{ sp.abbr(g.away) }} @ {{ sp.abbr(g.home) }}</a></td>
         <td class="num pick">{{ sp.abbr(p.spread_pick) if p.spread_pick != 'PASS' else '—' }} {{ p.spread_pick_line|line if p.spread_pick != 'PASS' else '' }}</td>
         <td class="num">{{ p.spread_edge|num }}</td>
-        <td class="num pick">{{ p.total_pick|title }} {{ p.line_total|num }}</td>
-        <td class="num">{{ p.total_edge|num }}</td>
       </tr>
     {% endfor %}
     </tbody>

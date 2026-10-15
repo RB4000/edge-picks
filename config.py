@@ -55,6 +55,12 @@ FREEZE_WEEKDAY = 1            # Monday=0, Tuesday=1
 FREEZE_HOUR = 7
 FREEZE_TZ = "America/Chicago"
 
+# Sides only. Totals (over/under) picks were made and graded through TOTALS_LAST_WEEK and discontinued on
+# TOTALS_DISCONTINUED, before any later week's game kicked off. Earlier total picks stay in the ledger and keep their
+# grades; total picks locked for later weeks are void (never graded, never shown).
+TOTALS_LAST_WEEK = (2026, 5)
+TOTALS_DISCONTINUED = "2026-10-15"
+
 # Grading. A pick is eligible to grade GRADE_AFTER_HOURS after kickoff; an eligible game still without a final
 # score STALE_RESULT_HOURS after kickoff is logged as a WARNING. When the published closing line is missing, our
 # own last pre-kickoff snapshot stands in only if it was taken within CLOSE_SNAPSHOT_MAX_HOURS of kickoff;

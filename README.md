@@ -1,6 +1,6 @@
-# Edge Picks — NFL + college football spread & totals model
+# Edge Picks — NFL + college football point-spread model
 
-An opponent-adjusted EPA model that projects every NFL and FBS college game's score. NFL picks are published against a locked, timestamped line; college games get projections only. A static site shows each week's card, per-game breakdowns, and a season record graded automatically from final scores.
+An opponent-adjusted EPA model that projects every NFL and FBS college game's score. NFL spread picks (sides only, no totals) are published against a locked, timestamped line; college games get projections only. A static site shows each week's card, per-game breakdowns, and a season record graded automatically from final scores.
 
 > The brand name is set in one place: `BRAND_NAME` in [`config.py`](config.py). The disclaimer text lives there too.
 
@@ -12,16 +12,16 @@ An opponent-adjusted EPA model that projects every NFL and FBS college game's sc
 
 **2. Recent games count more. Last season is the starting point, not the answer.** Within a season, games are weighted by recency (6-week half-life). Each season starts from last season's final ratings, pulled 40% back toward average for roster turnover. That prior is worth about 5 games of data, so by midseason the current year dominates.
 
-**3. Pace drives totals.** The same regression on offensive plays per game rates each team's pace and the pace its defense allows. We also track seconds per snap in neutral game states. Projected plays × projected EPA/play → projected points.
+**3. Pace turns efficiency into points.** The same regression on offensive plays per game rates each team's pace and the pace its defense allows. We also track seconds per snap in neutral game states. Projected plays × projected EPA/play → projected points.
 
-**4. Home field is measured, not assumed, and enters exactly once.** The regressions include a home/road term, but only as a control so a home-heavy early schedule doesn't inflate a team's ratings. It is thrown away at projection time. Home field enters the projected score once, as points: half added to the home side and half subtracted from the away side, so it moves the spread but not the total.
+**4. Home field is measured, not assumed, and enters exactly once.** The regressions include a home/road term, but only as a control so a home-heavy early schedule doesn't inflate a team's ratings. It is thrown away at projection time. Home field enters the projected score once, as points: half added to the home side and half subtracted from the away side, so it moves the spread but not the combined score.
 - *NFL:* the recency-weighted average home margin in non-neutral games since 2021 (about +2.1). NFL schedules are balanced, so team strength cancels out.
 - *College:* big programs host smaller ones, so a raw average (+4.8) overstates it. A regression of FBS-vs-FBS margins on team-season strength plus a home indicator gives about +3.1.
 - Neutral-site games (international, bowls, and London "home" games nflverse labels as Home) get zero.
 
-**5. Totals are calibrated to how the market prices them.** NFL scoring skews high: a few shootouts pull the *average* game about a point above the *typical* (median) game. The model projects averages, while market totals sit near the median, so an uncalibrated model leans over. Each week's projected totals are shifted by the median gap between model and market totals across every earlier game. The model still says which games should be higher- or lower-scoring than the market expects. It no longer makes a blanket call on the whole league's scoring.
+**5. Projected scores are calibrated to the typical game.** NFL scoring skews high: a few shootouts pull the *average* game about a point above the *typical* (median) game. Each week's projected scores are shifted down by the median gap between the model's and the market's combined scores across every earlier game, split evenly between the teams, so the spread is unchanged.
 
-**6. Model line vs. market line.** Projected scores give a model spread and total. The difference from the market line is the **edge**, and the pick is whichever side the model prefers. Edges are tiered: **under 2**, **2–3.5**, and **3.5+** points.
+**6. Model spread vs. market spread (sides only).** Projected scores give a model spread. The difference from the market spread is the **edge**, and the pick is whichever side the model prefers. Totals (over/under) picks were made only through 2026 Week 5 and discontinued on 2026-10-15 (`TOTALS_LAST_WEEK` in `config.py`); those picks keep their grades in the ledger, and total picks locked for later weeks are void. Edges are tiered: **under 2**, **2–3.5**, and **3.5+** points.
 
 ### The rules (transparency is the product)
 
@@ -49,7 +49,7 @@ Injuries, QB changes, weather, travel, motivation — except as they've already 
 
 Before each week, ratings were refit using only earlier games. Picks were graded against **closing** lines at −110 (break-even 52.4%). Parameters were set before the backtest and **not tuned to it**. Full report with confidence intervals and a parameter-sensitivity table: [`backtest_results.md`](backtest_results.md).
 
-Headline, NFL (v1.1): **ATS 547-563-29 (49.3%), totals 554-575-10 (49.1%)** against closing lines. NCAAF (v1.1, FBS vs FBS): **ATS 1519-1589-66 (48.9%), totals 1621-1508-45 (51.8%)**. Neither beats closing lines at −110 (break-even 52.4%), and the market-blend weight fit on results is zero for both models' spreads. So the site is framed as a transparent, timestamped, never-edited record of a public model, not as market-beating picks. College is projections only (no picks). One post-hoc slice, NFL spread disagreements of 7+ points, is tracked forward from Week 6 2026 as a separately tallied experiment (`SPREAD_EXPERIMENT` in `config.py`).
+Headline, NFL (v1.1): **ATS 547-563-29 (49.3%)** against closing lines. NCAAF (v1.1, FBS vs FBS): **ATS 1519-1589-66 (48.9%)**. Neither beats closing lines at −110 (break-even 52.4%), and the market-blend weight fit on results is zero for both models' spreads. So the site is framed as a transparent, timestamped, never-edited record of a public model, not as market-beating picks. College is projections only (no picks). One post-hoc slice, NFL spread disagreements of 7+ points, is tracked forward from Week 6 2026 as a separately tallied experiment (`SPREAD_EXPERIMENT` in `config.py`).
 
 ---
 

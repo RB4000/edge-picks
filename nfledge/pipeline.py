@@ -134,7 +134,7 @@ def lock_picks(sport, sched, tg, groups, week, now):
             continue
         fl = frozen.loc[g.game_id]
         pr = ratings.project(fit, g.home_team, g.away_team, g.neutral)
-        pk = picks.make_pick(g.home_team, g.away_team, pr["margin"], pr["total"], fl.home_spread, fl.total)
+        pk = picks.make_pick(g.home_team, g.away_team, pr["margin"], fl.home_spread)
         rows.append({
             "game_id": g.game_id, "season": sport.season, "week": week, "kickoff_utc": utc_iso(g.kickoff_utc),
             "away": g.away_team, "home": g.home_team, "locked_at": utc_iso(now),
@@ -185,7 +185,8 @@ def record_closing(sport, sched, now):
 
 
 def graded(sport, sched):
-    """Picks joined with results: graded vs the frozen line AND vs the closing line, plus CLV."""
+    """Picks joined with results: graded vs the frozen line AND vs the closing line, plus CLV. Sides only;
+    total picks are graded only through config.TOTALS_LAST_WEEK (kept for the historical record)."""
     led = sport.ledger
     pk = led.read("picks")
     if pk.empty:
@@ -198,20 +199,24 @@ def graded(sport, sched):
         out = {"spread_result": None, "total_result": None, "spread_result_close": None, "total_result_close": None,
                "spread_clv": np.nan, "total_clv": np.nan}
         has_close = pd.notna(r.get("close_home_spread")) and pd.notna(r.get("close_total"))
+        totals = picks.totals_live(r.season, r.week)
         if r.final == True:  # noqa: E712 (NaN-safe)
             out["spread_result"] = picks.grade_spread(r.spread_pick, r.home, r.line_home_spread, r.home_score, r.away_score)
-            out["total_result"] = picks.grade_total(r.total_pick, r.line_total, r.home_score, r.away_score)
+            if totals:
+                out["total_result"] = picks.grade_total(r.total_pick, r.line_total, r.home_score, r.away_score)
             if not has_close:  # no trustworthy close: say so instead of grading against a stale number
                 out["spread_result_close"] = picks.NA if out["spread_result"] else None
                 out["total_result_close"] = picks.NA if out["total_result"] else None
             else:
                 out["spread_result_close"] = picks.grade_spread(r.spread_pick, r.home, r.close_home_spread,
                                                                 r.home_score, r.away_score)
-                out["total_result_close"] = picks.grade_total(r.total_pick, r.close_total, r.home_score, r.away_score)
+                if totals:
+                    out["total_result_close"] = picks.grade_total(r.total_pick, r.close_total, r.home_score,
+                                                                  r.away_score)
         if has_close and r.spread_pick not in (None, "PASS"):
             close_pick_line = r.close_home_spread if r.spread_pick == r.home else -r.close_home_spread
             out["spread_clv"] = r.spread_pick_line - close_pick_line
-        if has_close and r.total_pick in ("OVER", "UNDER"):
+        if totals and has_close and r.total_pick in ("OVER", "UNDER"):
             d = r.close_total - r.line_total
             out["total_clv"] = d if r.total_pick == "OVER" else -d
         return pd.Series(out)
@@ -242,15 +247,14 @@ def report_grading(sport, sched, g, prev, now, verbose=False):
     ko = pd.to_datetime(g["kickoff_utc"], utc=True)
     eligible = g[ko <= now - timedelta(hours=config.GRADE_AFTER_HOURS)]
     done = eligible[eligible["final"] == True]  # noqa: E712
-    was = set(prev.loc[prev["spread_result"].notna() | prev["total_result"].notna(), "game_id"]) if len(prev) else set()
+    was = set(prev.loc[prev["spread_result"].notna(), "game_id"]) if len(prev) else set()
     new = done[~done["game_id"].isin(was)]
-    no_close = done[done["spread_result_close"].eq(picks.NA) | done["total_result_close"].eq(picks.NA)]
+    no_close = done[done["spread_result_close"].eq(picks.NA)]
     log(f"  {sport.key} grading: {len(done)}/{len(eligible)} eligible picks graded ({len(new)} newly), "
         f"{len(g) - len(eligible)} not yet eligible, {len(no_close)} graded N/A vs close (no closing line)")
     for r in (done if verbose else new).itertuples():
         log(f"    graded {r.game_id} {r.away} {r.away_score:.0f} @ {r.home} {r.home_score:.0f}: "
-            f"spread {r.spread_result or '-'}/{r.spread_result_close or '-'} "
-            f"total {r.total_result or '-'}/{r.total_result_close or '-'} (frozen/close)")
+            f"spread {r.spread_result or '-'}/{r.spread_result_close or '-'} (frozen/close)")
     in_feed = set(sched["game_id"])
     for r in eligible[eligible["final"] != True].itertuples():  # noqa: E712
         hrs = (now - pd.Timestamp(r.kickoff_utc)).total_seconds() / 3600
