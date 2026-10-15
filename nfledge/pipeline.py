@@ -151,24 +151,34 @@ def lock_picks(sport, sched, tg, groups, week, now):
 
 def record_closing(sport, sched, now):
     """Closing line = the sport's published closing line once final (nflverse / CFBD consensus);
-    otherwise our last pre-kickoff snapshot. Written once, never overwritten."""
+    otherwise our last pre-kickoff snapshot, if taken within CLOSE_SNAPSHOT_MAX_HOURS of kickoff.
+    Written once, never overwritten. Games with neither stay without a close (graded N/A vs close)
+    and are retried on later runs."""
     led = sport.ledger
     pk = led.read("picks")
     have = set(led.read("closing_lines")["game_id"])
     done = sched[sched["final"] & sched["game_id"].isin(pk["game_id"]) & ~sched["game_id"].isin(have)]
     snaps = led.read("line_snapshots")
     source = {"nfl": "nflverse closing line", "ncaaf": "CFBD closing consensus"}[sport.key]
+    max_age = timedelta(hours=config.CLOSE_SNAPSHOT_MAX_HOURS)
     rows = []
     for _, g in done.iterrows():
         if pd.notna(g.close_home_spread) and pd.notna(g.close_total):
             rows.append({"game_id": g.game_id, "close_home_spread": g.close_home_spread,
                          "close_total": g.close_total, "close_source": source, "recorded_at": utc_iso(now)})
-        else:
-            s = snaps[(snaps["game_id"] == g.game_id) & (pd.to_datetime(snaps["fetched_at"]) < g.kickoff_utc)]
-            if len(s):
-                last = s.iloc[-1]
-                rows.append({"game_id": g.game_id, "close_home_spread": last.home_spread, "close_total": last.total,
-                             "close_source": f"last pre-kickoff snapshot ({last.source})", "recorded_at": utc_iso(now)})
+            continue
+        s = snaps[(snaps["game_id"] == g.game_id) & (pd.to_datetime(snaps["fetched_at"]) < g.kickoff_utc)]
+        if not len(s):
+            log(f"  {sport.key} closing line UNAVAILABLE {g.game_id}: no {source} and no pre-kickoff snapshot")
+            continue
+        last = s.iloc[-1]
+        age = g.kickoff_utc - pd.to_datetime(last.fetched_at)
+        if age > max_age:
+            log(f"  {sport.key} closing line UNAVAILABLE {g.game_id}: no {source}; last snapshot was "
+                f"{age.total_seconds() / 3600:.0f}h before kickoff (limit {config.CLOSE_SNAPSHOT_MAX_HOURS}h)")
+            continue
+        rows.append({"game_id": g.game_id, "close_home_spread": last.home_spread, "close_total": last.total,
+                     "close_source": f"last pre-kickoff snapshot ({last.source})", "recorded_at": utc_iso(now)})
     n = led.append("closing_lines", rows)
     if n:
         log(f"  {sport.key} closing lines: {n} recorded")
@@ -191,7 +201,10 @@ def graded(sport, sched):
         if r.final == True:  # noqa: E712 (NaN-safe)
             out["spread_result"] = picks.grade_spread(r.spread_pick, r.home, r.line_home_spread, r.home_score, r.away_score)
             out["total_result"] = picks.grade_total(r.total_pick, r.line_total, r.home_score, r.away_score)
-            if has_close:
+            if not has_close:  # no trustworthy close: say so instead of grading against a stale number
+                out["spread_result_close"] = picks.NA if out["spread_result"] else None
+                out["total_result_close"] = picks.NA if out["total_result"] else None
+            else:
                 out["spread_result_close"] = picks.grade_spread(r.spread_pick, r.home, r.close_home_spread,
                                                                 r.home_score, r.away_score)
                 out["total_result_close"] = picks.grade_total(r.total_pick, r.close_total, r.home_score, r.away_score)
@@ -206,9 +219,49 @@ def graded(sport, sched):
     return pd.concat([g, g.apply(row, axis=1)], axis=1)
 
 
+class ResultsFetchError(RuntimeError):
+    pass
+
+
+def check_results_feed(sport, sched, now):
+    """Fail loudly when the results feed came back empty instead of grading nothing in silence."""
+    cur = sched[sched["season"] == sport.season]
+    if cur.empty:
+        raise ResultsFetchError(f"results feed returned no {sport.season} games")
+    started = cur[cur["kickoff_utc"] <= now - timedelta(hours=config.GRADE_AFTER_HOURS)]
+    if len(started) and not started["final"].any():
+        raise ResultsFetchError(f"results feed has 0 final scores although {len(started)} {sport.season} game(s) "
+                                f"kicked off more than {config.GRADE_AFTER_HOURS}h ago")
+
+
+def report_grading(sport, sched, g, prev, now, verbose=False):
+    """One summary line per run, plus a reason for every eligible pick left ungraded."""
+    if not len(g):
+        log(f"  {sport.key} grading: no picks in the ledger")
+        return
+    ko = pd.to_datetime(g["kickoff_utc"], utc=True)
+    eligible = g[ko <= now - timedelta(hours=config.GRADE_AFTER_HOURS)]
+    done = eligible[eligible["final"] == True]  # noqa: E712
+    was = set(prev.loc[prev["spread_result"].notna() | prev["total_result"].notna(), "game_id"]) if len(prev) else set()
+    new = done[~done["game_id"].isin(was)]
+    no_close = done[done["spread_result_close"].eq(picks.NA) | done["total_result_close"].eq(picks.NA)]
+    log(f"  {sport.key} grading: {len(done)}/{len(eligible)} eligible picks graded ({len(new)} newly), "
+        f"{len(g) - len(eligible)} not yet eligible, {len(no_close)} graded N/A vs close (no closing line)")
+    for r in (done if verbose else new).itertuples():
+        log(f"    graded {r.game_id} {r.away} {r.away_score:.0f} @ {r.home} {r.home_score:.0f}: "
+            f"spread {r.spread_result or '-'}/{r.spread_result_close or '-'} "
+            f"total {r.total_result or '-'}/{r.total_result_close or '-'} (frozen/close)")
+    in_feed = set(sched["game_id"])
+    for r in eligible[eligible["final"] != True].itertuples():  # noqa: E712
+        hrs = (now - pd.Timestamp(r.kickoff_utc)).total_seconds() / 3600
+        why = "missing from results feed" if r.game_id not in in_feed else "no final score in results feed"
+        level = "WARNING " if hrs >= config.STALE_RESULT_HOURS else ""
+        log(f"    {level}skipped {r.game_id}: {why} ({hrs:.0f}h after kickoff)")
+
+
 # --- orchestration ------------------------------------------------------------------------
 
-def run_sport(sport, now, refresh=True):
+def run_sport(sport, now, refresh=True, verbose=False):
     log(f"{sport.label}: refreshing schedules + play-by-play")
     sched, tg, groups = sport.load(refresh=refresh)
     week = sport.current_week(sched, now)
@@ -227,14 +280,18 @@ def run_sport(sport, now, refresh=True):
         log(f"{sport.label}: current week {sport.season} week {week}")
         capture_lines(sport, sched, week, now)
         lock_picks(sport, sched, tg, groups, week, now)
+    check_results_feed(sport, sched, now)
     record_closing(sport, sched, now)
     g = graded(sport, sched)
+    gpath = sport.ledger.root / "graded.csv"
+    prev = pd.read_csv(gpath, dtype={"game_id": str}) if gpath.exists() else pd.DataFrame()
+    report_grading(sport, sched, g, prev, now, verbose)
     if len(g):
-        g.to_csv(sport.ledger.root / "graded.csv", index=False)
+        g.to_csv(gpath, index=False)
     return {"sport": sport, "sched": sched, "graded": g, "week": week}
 
 
-def update(build=True, refresh=True, only=None):
+def update(build=True, refresh=True, only=None, verbose=False):
     (ROOT / "data").mkdir(exist_ok=True)
     lockfile = open(ROOT / "data" / ".update.lock", "w")
     try:
@@ -248,7 +305,7 @@ def update(build=True, refresh=True, only=None):
         if only and sport.key != only:
             continue
         try:
-            results.append(run_sport(sport, now, refresh))
+            results.append(run_sport(sport, now, refresh, verbose))
         except Exception as e:  # one sport's outage must not block the other
             log(f"{sport.label}: FAILED ({type(e).__name__}: {e})")
             failed.append(sport.key)
@@ -280,9 +337,10 @@ def main(argv=None):
     ap.add_argument("cmd", choices=["update", "build", "backtest", "sheet"])
     ap.add_argument("--sport", choices=list(BY_KEY), help="limit to one sport")
     ap.add_argument("--no-refresh", action="store_true", help="use cached data")
+    ap.add_argument("-v", "--verbose", action="store_true", help="log every graded game, not just new ones")
     a = ap.parse_args(argv)
     if a.cmd == "update":
-        return update(refresh=not a.no_refresh, only=a.sport)
+        return update(refresh=not a.no_refresh, only=a.sport, verbose=a.verbose)
     if a.cmd == "build":
         from nfledge import site
         site.build_all(load_results())

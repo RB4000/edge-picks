@@ -55,6 +55,14 @@ FREEZE_WEEKDAY = 1            # Monday=0, Tuesday=1
 FREEZE_HOUR = 7
 FREEZE_TZ = "America/Chicago"
 
+# Grading. A pick is eligible to grade GRADE_AFTER_HOURS after kickoff; an eligible game still without a final
+# score STALE_RESULT_HOURS after kickoff is logged as a WARNING. When the published closing line is missing, our
+# own last pre-kickoff snapshot stands in only if it was taken within CLOSE_SNAPSHOT_MAX_HOURS of kickoff;
+# otherwise the vs-close grade is marked N/A rather than graded against a stale number.
+GRADE_AFTER_HOURS = 4
+STALE_RESULT_HOURS = 24
+CLOSE_SNAPSHOT_MAX_HOURS = 12
+
 # Prospective forward test, declared 2026-10-07 before any Week 6 line froze. In the 2022-2025 backtest,
 # NFL spread picks with a raw model-vs-market disagreement of 7+ points went 35-27-2 (56.5%, 62 decided games). That
 # slice was found after looking at the results, so it is tested forward only, starting Week 6 2026,

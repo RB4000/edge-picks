@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Idempotent: refresh data, capture/freeze lines, lock picks, regrade, rebuild ./site.
 # Safe to run repeatedly or from cron; a file lock prevents overlapping runs.
+# Extra args go to the pipeline, e.g. ./update.sh --verbose
 #   AUTO_DEPLOY=1        also deploy to Cloudflare Pages after a successful update
 #   LEDGER_AUTOCOMMIT=1  git-commit any ledger changes and push them to origin (GitHub's push
 #                        timestamps are the outside record that picks existed before kickoff)
@@ -14,7 +15,10 @@ if [ ! -x .venv/bin/python ]; then
   exit 1
 fi
 
-.venv/bin/python -m nfledge.pipeline update
+echo "=== update $(date '+%Y-%m-%d %H:%M:%S %Z') ==="
+trap 'rc=$?; [ $rc -ne 0 ] && echo "[$(date +%H:%M:%S)] UPDATE FAILED (exit $rc): ledger not committed, site not deployed" >&2' EXIT
+
+.venv/bin/python -m nfledge.pipeline update "$@"
 
 if [ "${LEDGER_AUTOCOMMIT:-0}" = "1" ] && [ -d .git ]; then
   if [ -n "$(git status --porcelain ledger)" ]; then

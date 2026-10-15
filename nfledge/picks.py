@@ -4,6 +4,7 @@ import math
 import config
 
 BREAKEVEN_110 = 110 / 210  # 52.38%
+NA = "N/A"  # vs-close grade when no trustworthy closing line exists; ignored by record()
 
 
 def tier_of(edge):

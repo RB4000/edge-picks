@@ -7,8 +7,8 @@ setup:            ## create virtualenv (Python 3.11-3.13) and install deps
 	$(PY) -m pip install -q --upgrade pip
 	$(PY) -m pip install -q -r requirements.txt
 
-update:           ## refresh data, capture lines, lock picks, regrade, rebuild site
-	./update.sh
+update:           ## refresh data, capture lines, lock picks, regrade, rebuild site (V=1: log every graded game)
+	./update.sh $(if $(V),--verbose,)
 
 build:            ## rebuild ./site from the ledger without refreshing data
 	$(PY) -m nfledge.pipeline build

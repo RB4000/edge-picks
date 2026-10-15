@@ -9,7 +9,7 @@
 {%- endmacro %}
 
 {% macro result_chip(r) -%}
-{% if r == 'W' %}<span class="chip chip-w">Win</span>{% elif r == 'L' %}<span class="chip chip-l">Loss</span>{% elif r == 'P' %}<span class="chip chip-p">Push</span>{% endif %}
+{% if r == 'W' %}<span class="chip chip-w">Win</span>{% elif r == 'L' %}<span class="chip chip-l">Loss</span>{% elif r == 'P' %}<span class="chip chip-p">Push</span>{% elif r == 'N/A' %}<span class="chip" title="No closing line was captured for this game">N/A</span>{% endif %}
 {%- endmacro %}
 
 {% macro edgebar(edge, slug) -%}
